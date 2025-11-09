@@ -62,200 +62,69 @@ MAX_EDITION_AGE = timedelta(minutes=2)
 
 # UI VIEWS --------------------------------------------------------
 
-class InfoView(ui.LayoutView):
-    """Vue pour afficher les informations du bot."""
-    def __init__(self, bot: commands.Bot, channel: discord.TextChannel, context_stats: dict, stats: dict, global_stats: dict, config: str, tools: list):
-        super().__init__(timeout=300)
-        self.bot = bot
-        
-        container = ui.Container()
-        
-        header = ui.TextDisplay(f"## {bot.user.name}")
-        container.add_item(header)
-        subtitle = ui.TextDisplay("*Assistante IA pour Discord*")
-        container.add_item(subtitle)
-        container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.large))
-        
-        session_title = ui.TextDisplay(f"### Session · {channel.name}")
-        container.add_item(session_title)
-        
-        session_text = f"**Messages en contexte** · `{context_stats['total_messages']}`\n"
-        session_text += f"**Tokens utilisés** · `{context_stats['total_tokens']} / 16k` ({context_stats['window_usage_pct']:.1f}%)\n"
-        if stats.get('last_completion'):
-            last = stats['last_completion']
-            delta = datetime.now(timezone.utc) - last
-            minutes = int(delta.total_seconds() / 60)
-            session_text += f"**Dernière réponse** · il y a {minutes}m"
-        else:
-            session_text += "**Dernière réponse** · jamais"
-        
-        session_info = ui.TextDisplay(session_text)
-        container.add_item(session_info)
-        container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.small))
-        
-        if tools:
-            tools_title = ui.TextDisplay(f"### Outils disponibles · {len(tools)}")
-            container.add_item(tools_title)
-            
-            tools_list = '\n'.join([f"• {t.name}" for t in tools[:5]])
-            if len(tools) > 5:
-                tools_list += f"\n• ... et {len(tools) - 5} autres"
-            tools_display = ui.TextDisplay(tools_list)
-            container.add_item(tools_display)
-            container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.small))
-        
-        config_title = ui.TextDisplay("### Configuration serveur")
-        container.add_item(config_title)
-        
-        mode_text = {
-            'off': 'Désactivé',
-            'strict': 'Mentions directes uniquement',
-            'greedy': 'Mentions + nom du bot'
-        }.get(config, config.upper())
-        
-        config_info = ui.TextDisplay(f"**Mode** · `{mode_text}`")
-        container.add_item(config_info)
-        container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.small))
-        
-        client_stats = global_stats['client_stats']
-        session_stats = global_stats['session_stats']
-        
-        global_title = ui.TextDisplay("### Statistiques globales")
-        container.add_item(global_title)
-        
-        global_text = f"**Complétions** · `{client_stats['completions']}`\n"
-        global_text += f"**Transcriptions** · `{client_stats['transcriptions']}`\n"
-        global_text += f"**Sessions actives** · `{session_stats['active_sessions']}`\n"
-        global_text += f"**Cache** · `{session_stats['cache_stats']['transcript_cache_size']} transcriptions, {session_stats['cache_stats']['video_cache_size']} vidéos`"
-        
-        global_info = ui.TextDisplay(global_text)
-        container.add_item(global_info)
-        
-        thumb = ui.Thumbnail(media=bot.user.display_avatar.url)
-        container.add_item(thumb)
-        
-        container.add_item(ui.Separator())
-        footer = ui.TextDisplay("-# Utilisez /chatbot pour configurer MARIA")
-        container.add_item(footer)
-        
-        self.add_item(container)
-
-class ProfileEditModal(ui.Modal, title="Modifier votre profil"):
-    """Modal pour éditer le profil utilisateur."""
+class ProfileModal(ui.Modal, title="Votre profil"):
+    """Modal pour afficher et modifier le profil utilisateur."""
     
-    def __init__(self, memory_manager, user_id: int, current_content: str, original_message: discord.Message):
+    def __init__(self, memory_manager, user_id: int, current_content: str):
         super().__init__()
         self.memory_manager = memory_manager
         self.user_id = user_id
-        self.original_message = original_message
         
         self.content_input = ui.TextInput(
-            label="Votre profil",
+            label="Profil",
             style=discord.TextStyle.paragraph,
-            default=current_content,
+            placeholder="Informations sur vous (nom, âge, métier, compétences, préférences...)",
+            default=current_content if current_content else None,
+            min_length=10,
             max_length=1000,
-            required=True
+            required=False
         )
         self.add_item(self.content_input)
     
     async def on_submit(self, interaction: Interaction):
-        """Sauvegarde les modifications."""
+        """Sauvegarde les modifications ou supprime le profil."""
         new_content = self.content_input.value.strip()
         
+        # Si vide, supprimer le profil
         if not new_content:
-            await interaction.response.send_message(
-                "Le profil ne peut pas être vide.",
-                ephemeral=True
-            )
+            success = self.memory_manager.delete_profile(self.user_id)
+            if success:
+                await interaction.response.send_message(
+                    "Profil supprimé.",
+                    ephemeral=True
+                )
+            else:
+                await interaction.response.send_message(
+                    "Aucun profil à supprimer.",
+                    ephemeral=True
+                )
             return
         
+        # Sinon, sauvegarder
         profile = self.memory_manager.get_profile(self.user_id)
         if profile:
             profile.content = new_content
             profile.updated_at = datetime.now(timezone.utc)
-            self.memory_manager._save_profile(profile)
-            
-            # Répondre d'abord
-            await interaction.response.send_message(
-                "Profil mis à jour avec succès.",
-                ephemeral=True
-            )
-            
-            # Puis recréer et éditer la vue
-            new_view = MemoryProfileView(
-                user=interaction.user,
-                profile=profile,
-                memory_manager=self.memory_manager
-            )
-            
-            await self.original_message.edit(view=new_view)
         else:
-            await interaction.response.send_message(
-                "Erreur lors de la mise à jour.",
-                ephemeral=True
+            from common.memory import UserProfile
+            profile = UserProfile(
+                user_id=self.user_id,
+                content=new_content,
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+                messages_since_update=0
             )
-
-class ProfileEditButton(ui.Button['MemoryProfileView']):
-    """Bouton pour éditer le profil."""
-    def __init__(self):
-        super().__init__(label="Modifier", style=discord.ButtonStyle.primary)
-    
-    async def callback(self, interaction: Interaction):
-        """Ouvre le modal d'édition."""
-        modal = ProfileEditModal(self.view.memory_manager, self.view.user.id, self.view.profile.content, interaction.message)
-        await interaction.response.send_modal(modal)
-
-class ProfileResetButton(ui.Button['MemoryProfileView']):
-    """Bouton pour effacer le profil."""
-    def __init__(self):
-        super().__init__(label="Effacer", style=discord.ButtonStyle.danger)
-    
-    async def callback(self, interaction: Interaction):
-        """Efface le profil."""
-        success = self.view.memory_manager.delete_profile(self.view.user.id)
-        if success:
-            await interaction.response.edit_message(
-                content="Toutes vos informations ont été effacées.",
-                view=None,
-                embeds=[]
-            )
-            self.view.stop()
-        else:
-            await interaction.response.send_message(
-                "Aucune information à effacer.",
-                ephemeral=True
-            )
-
-class MemoryProfileView(ui.LayoutView):
-    """Vue pour afficher le profil mémoire d'un utilisateur."""
-    def __init__(self, user: discord.User, profile, memory_manager):
-        super().__init__(timeout=300)
-        self.user = user
-        self.profile = profile
-        self.memory_manager = memory_manager
         
-        container = ui.Container()
+        self.memory_manager._save_profile(profile)
         
-        header = ui.TextDisplay(f"## Votre profil")
-        container.add_item(header)
-        container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.large))
-        
-        # Afficher le contenu du profil avec bouton Modifier
-        content_display = ui.TextDisplay(profile.content.strip())
-        edit_button = ProfileEditButton()
-        content_section = ui.Section(content_display, accessory=edit_button)
-        container.add_item(content_section)
-        
-        container.add_item(ui.Separator())
-        # Convertir UTC vers Paris
+        # Convertir UTC vers Paris pour l'affichage
         last_update_paris = profile.updated_at.astimezone(PARIS_TZ)
-        last_update = last_update_paris.strftime("%d/%m/%y %H:%M")
-        footer_text = ui.TextDisplay(f"-# Mis à jour le {last_update}")
-        reset_button = ProfileResetButton()
-        footer_section = ui.Section(footer_text, accessory=reset_button)
-        container.add_item(footer_section)
+        last_update = last_update_paris.strftime("%d/%m/%y à %H:%M")
         
-        self.add_item(container)
+        await interaction.response.send_message(
+            f"**Profil mis à jour**\n\n{new_content}\n\n-# Mis à jour le {last_update}",
+            ephemeral=True
+        )
 
 # COG -------------------------------------------------------------
 
@@ -683,23 +552,54 @@ class Chat(commands.Cog):
         stats = handle.get_stats()
         context_stats = stats['context_stats']
         global_stats = self.gpt_api.get_stats()
+        client_stats = global_stats['client_stats']
+        session_stats = global_stats['session_stats']
         
         # Configuration
         config = self.get_guild_config(interaction.guild, 'chatbot_mode', str)
+        mode_text = {
+            'off': 'Désactivé',
+            'strict': 'Mentions directes uniquement',
+            'greedy': 'Mentions + nom du bot'
+        }.get(config, config.upper())
         
-        # Créer la vue
+        # Outils
         tools = self.gpt_api.get_all_tools()
-        view = InfoView(
-            bot=self.bot,
-            channel=interaction.channel,
-            context_stats=context_stats,
-            stats=stats,
-            global_stats=global_stats,
-            config=config,
-            tools=tools
-        )
+        tools_list = ', '.join([t.name for t in tools[:5]])
+        if len(tools) > 5:
+            tools_list += f" et {len(tools) - 5} autres"
         
-        await interaction.response.send_message(view=view)
+        # Dernière réponse
+        if stats.get('last_completion'):
+            last = stats['last_completion']
+            delta = datetime.now(timezone.utc) - last
+            minutes = int(delta.total_seconds() / 60)
+            last_response = f"il y a {minutes}m"
+        else:
+            last_response = "jamais"
+        
+        # Construire le message
+        info_text = f"""**{self.bot.user.name}** · Assistante IA pour Discord
+
+**Session** · {interaction.channel.mention}
+Messages en contexte: `{context_stats['total_messages']}`
+Tokens utilisés: `{context_stats['total_tokens']} / 16k` ({context_stats['window_usage_pct']:.1f}%)
+Dernière réponse: {last_response}
+
+**Outils disponibles** · {len(tools)}
+{tools_list}
+
+**Configuration serveur**
+Mode: `{mode_text}`
+
+**Statistiques globales**
+Complétions: `{client_stats['completions']}`
+Transcriptions: `{client_stats['transcriptions']}`
+Sessions actives: `{session_stats['active_sessions']}`
+
+-# Utilisez /chatbot pour configurer MARIA"""
+        
+        await interaction.response.send_message(info_text, ephemeral=True)
     
     # Groupe de commandes chatbot
     chatbot_group = app_commands.Group(
@@ -750,17 +650,11 @@ class Chat(commands.Cog):
     async def memory(self, interaction: Interaction):
         """Affiche et modifie votre profil enregistré par MARIA."""
         profile = self.memory.get_profile(interaction.user.id)
+        current_content = profile.content if profile else ""
         
-        if not profile or not profile.content:
-            return await interaction.response.send_message(
-                "Aucune information enregistrée pour le moment.",
-                ephemeral=True
-            )
-        
-        # Créer la vue
-        view = MemoryProfileView(user=interaction.user, profile=profile, memory_manager=self.memory)
-        
-        await interaction.response.send_message(view=view, ephemeral=True)
+        # Ouvrir le modal directement
+        modal = ProfileModal(self.memory, interaction.user.id, current_content)
+        await interaction.response.send_modal(modal)
  
 async def setup(bot):
     await bot.add_cog(Chat(bot))

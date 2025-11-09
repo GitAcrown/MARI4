@@ -728,15 +728,9 @@ class Chat(commands.Cog):
         # Puis sauvegarder la config
         self.set_guild_config(interaction.guild, 'chatbot_mode', mode)
     
-    # Groupe de commandes memory
-    memory_group = app_commands.Group(
-        name='memory',
-        description="Gestion de la mémoire long terme"
-    )
-    
-    @memory_group.command(name='show')
-    async def memory_show(self, interaction: Interaction):
-        """Affiche votre profil enregistré par MARIA."""
+    @app_commands.command(name='memory')
+    async def memory(self, interaction: Interaction):
+        """Affiche et modifie votre profil enregistré par MARIA."""
         profile = self.memory.get_profile(interaction.user.id)
         
         if not profile or not profile.content:

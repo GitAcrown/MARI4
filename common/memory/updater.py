@@ -110,7 +110,7 @@ class ProfileUpdater:
             
             parsed = response.choices[0].message.parsed
             
-            logger.debug(f"Réponse mini-IA: no_change={parsed.no_change}, identite={parsed.identite[:50] if parsed.identite else 'vide'}...")
+            logger.debug(f"Réponse mini-IA: no_change={parsed.no_change}, content={parsed.content[:50] if parsed.content else 'vide'}...")
             
             # Si aucun changement (sauf si force=True)
             if parsed.no_change and not force:

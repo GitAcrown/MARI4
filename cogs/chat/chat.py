@@ -335,14 +335,14 @@ class Chat(commands.Cog):
             )
         
         success = await self.memory.force_update(user_id, recent_messages)
-        
+        new_content = self.memory.get_profile_text(user_id)
         if success:
             logger.info(f"Profil de {user_name} mis à jour par l'IA")
             return ToolResponseRecord(
                 tool_call_id=tool_call.id,
-                response_data={'result': "Profil mis à jour avec succès."},
+                response_data={'result': "Profil mis à jour avec succès.", 'new_content': new_content},
                 created_at=datetime.now(timezone.utc),
-                metadata={'header': f"Mise à jour du profil de {user_name}"}
+                metadata={'header': f"Mise à jour du profil de ***{user_name}***"}
             )
         else:
             return ToolResponseRecord(

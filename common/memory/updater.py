@@ -20,7 +20,7 @@ class UserProfileSchema(BaseModel):
     no_change: bool = False  # True si aucune nouvelle info
 
 # Prompt pour la mini-IA
-PROFILE_UPDATE_PROMPT = """Tu dois mettre a jour un profil utilisateur pour une IA.
+PROFILE_UPDATE_PROMPT = """Mets a jour le profil utilisateur.
 
 PROFIL ACTUEL:
 {current_profile}
@@ -28,53 +28,29 @@ PROFIL ACTUEL:
 NOUVEAUX MESSAGES:
 {messages}
 
-OBJECTIF:
-Garder uniquement les informations UTILES pour personnaliser les interactions futures avec cette personne.
+REGLE #1: Le champ "content" contient UNIQUEMENT le profil en texte brut. PAS de prefixes comme "Ajout:", "Information:", etc.
 
-QUE RETENIR (exemples):
-- Identite STABLE: prenom, metier, localisation generale (ville/pays)
-- Préférences de communication: ton souhaite, niveau de detail, sujets à éviter
-- Competences professionnelles ou techniques importantes
-- Contraintes durables: limites, besoins spécifiques, accessibilité
+REGLE #2: Garde SEULEMENT les infos utiles long terme:
+- Prenom, metier, ville/pays
+- Preferences de ton (tutoiement, niveau detail, sujets a eviter)
+- Competences techniques importantes
+- Contraintes durables
 
-QUE NE PAS RETENIR (exemples):
-- Age exact (change chaque annee, inutile)
-- Goûts personnels temporaires ("aime les blondes", "intéresse par X produit")
-- Projets ponctuels ou achats envisages
-- Descriptions physiques ou preferences esthetiques
-- Actions du moment ("cherche actuellement", "veut acheter")
-- Informations sur d'autres personnes
-- Détails anecdotiques sans impact sur les futures interactions
+REGLE #3: IGNORE tout le reste:
+- Age, gouts temporaires, projets ponctuels
+- Descriptions physiques, preferences esthetiques
+- Actions du moment, infos sur d'autres personnes
 
-INSTRUCTIONS:
-1. Lis le profil actuel et les nouveaux messages
-2. Détermine s'il y a de nouvelles infos pertinentes à ajouter
-3. Si OUI: écris le profil mis à jour dans le champ "content" et mets "no_change" à false
-4. Si NON: recopie exactement le profil actuel dans "content" et mets "no_change" à true
-5. Profite éventuellement pour essentialiser les informations importantes et garder que le plus pertinent
+REGLE #4: N'ecris QUE ce qui est EXPLICITEMENT dit. Aucune supposition.
 
-REGLES STRICTES - CE QUI EST INTERDIT:
-- AUCUNE supposition, inférence ou déduction
-- AUCUNE interprétation de ce que l'utilisateur "pourrait" vouloir dire
-- AUCUNE généralisation à partir d'un exemple unique
-- N'écris QUE ce qui est EXPLICITEMENT dit par l'utilisateur lui-même
-- Si une info n'est pas claire ou certaine, NE L'ECRIS PAS
+REGLE #5: Profite pour NETTOYER le profil actuel:
+- Supprime les infos devenues inutiles ou obsoletes
+- Fusionne les doublons
+- Garde seulement l'essentiel
 
-EXEMPLES DE CE QU'IL NE FAUT PAS FAIRE:
-- Message: "je code en Python" -> N'écris PAS "développeur" (pas dit explicitement)
-- Message: "j'aime ce jeu" -> N'écris PAS "gamer" (trop général)
-- Message: "je suis fatigue" -> N'écris PAS "problèmes de sommeil" (supposition)
-- Message: "j'aime les blondes" -> N'écris PAS (préférence personnelle sans impact sur l'IA)
+REGLE #6: Si aucune nouvelle info ET profil deja propre: mets "no_change" a true et recopie le profil actuel.
 
-IMPORTANT:
-- Le champ "content" doit contenir UNIQUEMENT le texte du profil
-- N'écris JAMAIS "no_change" ou d'autres métadonnées dans le texte du profil
-- "no_change" est un champ séparé du schéma JSON
-
-FORMAT DU PROFIL:
-- Style télégraphique, phrases courtes et factuelles
-- Longueur: 400-700 caractères (environ 6-8 phrases)
-- Sois EXTREMEMENT conservateur: en cas de doute, n'ajoute rien"""
+FORMAT: Phrases courtes, style telegraphique, 400-700 caracteres."""
 
 class ProfileUpdater:
     """Mini IA pour mettre à jour les profils utilisateur."""

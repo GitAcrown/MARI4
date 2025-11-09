@@ -120,7 +120,7 @@ class MariaGptApi:
         session = self.session_manager.get_or_create_session(channel)
         return MariaSessionHandle(session)
     
-    async def ingest_message(self, channel: discord.abc.Messageable, message: discord.Message) -> None:
+    async def ingest_message(self, channel: discord.abc.Messageable, message: discord.Message, is_context_only: bool = False) -> None:
         """Ingère un message Discord dans le contexte d'un salon.
         
         Tous les messages doivent être ingérés pour alimenter le contexte.
@@ -129,10 +129,11 @@ class MariaGptApi:
         Args:
             channel: Salon Discord
             message: Message à ingérer
+            is_context_only: Si True, marque le message comme contexte uniquement
         """
         session = self.session_manager.get_or_create_session(channel)
-        await session.ingest_message(message)
-        logger.debug(f"Message {message.id} ingéré dans salon {channel.id}")
+        await session.ingest_message(message, is_context_only)
+        logger.debug(f"Message {message.id} ingéré dans salon {channel.id} (context_only={is_context_only})")
     
     async def run_completion(self, 
                             channel: discord.abc.Messageable,

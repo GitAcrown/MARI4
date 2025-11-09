@@ -78,7 +78,7 @@ class ChannelSession:
         
         logger.info(f"ChannelSession créée pour salon {channel_id}")
     
-    async def ingest_message(self, message: discord.Message) -> MessageRecord:
+    async def ingest_message(self, message: discord.Message, is_context_only: bool = False) -> MessageRecord:
         """Ingère un message Discord dans le contexte.
         
         Traite les pièces jointes, références, etc.
@@ -86,21 +86,23 @@ class ChannelSession:
         
         Args:
             message: Message Discord à ingérer
+            is_context_only: Si True, marque le message comme contexte uniquement
             
         Returns:
             MessageRecord créé
         """
         async with self._lock:
-            return await self._ingest_message_unsafe(message)
+            return await self._ingest_message_unsafe(message, is_context_only)
     
-    async def _ingest_message_unsafe(self, message: discord.Message) -> MessageRecord:
+    async def _ingest_message_unsafe(self, message: discord.Message, is_context_only: bool = False) -> MessageRecord:
         """Version non-thread-safe de l'ingestion (utilisée en interne)."""
         components = []
         
         # Contenu texte
         if message.content:
             user_format = DEFAULT_USER_FORMAT.format(message=message)
-            components.append(TextComponent(f"{user_format}: {message.clean_content}"))
+            context_marker = "[CONTEXTE] " if is_context_only else ""
+            components.append(TextComponent(f"{context_marker}{user_format}: {message.clean_content}"))
             
             # Extraction URLs d'images dans le texte
             for match in re.finditer(r'(https?://[^\s]+)', message.content):

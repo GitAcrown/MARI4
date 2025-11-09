@@ -73,6 +73,9 @@ class ChannelSession:
             'last_completion': None
         }
         
+        # Message ayant déclenché la complétion en cours
+        self.trigger_message: Optional[discord.Message] = None
+        
         logger.info(f"ChannelSession créée pour salon {channel_id}")
     
     async def ingest_message(self, message: discord.Message) -> MessageRecord:
@@ -206,6 +209,9 @@ class ChannelSession:
     
     async def _run_completion_unsafe(self, trigger_message: Optional[discord.Message]) -> AssistantRecord:
         """Version non-thread-safe de la complétion."""
+        # Stocker le trigger_message pour les outils
+        self.trigger_message = trigger_message
+        
         # Traiter les pièces jointes du dernier message si nécessaire
         if trigger_message:
             attachment_components = await self.process_attachments(trigger_message)

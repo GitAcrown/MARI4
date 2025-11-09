@@ -13,7 +13,7 @@ from discord import Interaction, app_commands, ui
 from discord.ext import commands
 
 from common import dataio
-from common.llm import MariaGptApi, Tool
+from common.llm import MariaGptApi, Tool, ToolCallRecord
 from common.memory import MemoryManager
 
 logger = logging.getLogger(f'MARI4.{__name__.split(".")[-1]}')
@@ -258,8 +258,15 @@ class Chat(commands.Cog):
     
     # OUTILS ------------------------------------------------------
     
-    async def _tool_update_user_profile(self, reason: str, trigger_message: discord.Message) -> dict:
+    async def _tool_update_user_profile(self, tool_call: ToolCallRecord, context_data) -> dict:
         """Outil pour l'IA : met à jour le profil de l'utilisateur."""
+        reason = tool_call.arguments.get('reason', 'Mise à jour manuelle')
+        
+        # Récupérer le trigger_message depuis la session
+        if not context_data or not hasattr(context_data, 'trigger_message') or not context_data.trigger_message:
+            return {'result': "Erreur: Message déclencheur introuvable.", 'metadata': {}}
+        
+        trigger_message = context_data.trigger_message
         user_id = trigger_message.author.id
         
         recent_messages = []

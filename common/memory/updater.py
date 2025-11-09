@@ -44,16 +44,33 @@ QUE NE PAS RETENIR (exemples):
 - Informations sur d'autres personnes mentionnees
 - Faits generaux non lies a l'utilisateur
 
-REGLES DE MISE A JOUR:
-- Conserve toutes les informations encore pertinentes du profil actuel, SURTOUT les preferences de communication
-- Ajoute uniquement des faits explicitement mentionnes ET utiles a long terme
-- Remplace une information seulement si explicitement contredite
-- Si aucune nouvelle info pertinente: mets "no_change" a TRUE et recopie le profil actuel dans "content"
+INSTRUCTIONS:
+1. Lis le profil actuel et les nouveaux messages
+2. Determine s'il y a de nouvelles infos pertinentes a ajouter
+3. Si OUI: ecris le profil mis a jour dans le champ "content" et mets "no_change" a false
+4. Si NON: recopie exactement le profil actuel dans "content" et mets "no_change" a true
 
-CONTRAINTES:
-- Aucune inference, supposition ou extrapolation
+REGLES STRICTES - CE QUI EST INTERDIT:
+- AUCUNE supposition, inference ou deduction
+- AUCUNE interpretation de ce que l'utilisateur "pourrait" vouloir dire
+- AUCUNE generalisation a partir d'un exemple unique
+- N'ecris QUE ce qui est EXPLICITEMENT dit par l'utilisateur lui-meme
+- Si une info n'est pas claire ou certaine, NE L'ECRIS PAS
+
+EXEMPLES DE CE QU'IL NE FAUT PAS FAIRE:
+- Message: "je code en Python" -> N'ecris PAS "developpeur" (pas dit explicitement)
+- Message: "j'aime ce jeu" -> N'ecris PAS "gamer" (trop general)
+- Message: "je suis fatigue" -> N'ecris PAS "problemes de sommeil" (supposition)
+
+IMPORTANT:
+- Le champ "content" doit contenir UNIQUEMENT le texte du profil
+- N'ecris JAMAIS "no_change" ou d'autres metadonnees dans le texte du profil
+- "no_change" est un champ separe du schema JSON
+
+FORMAT DU PROFIL:
 - Style telegraphique, phrases courtes et factuelles
-- Longueur: 400-700 caracteres (environ 6-8 phrases)"""
+- Longueur: 400-700 caracteres (environ 6-8 phrases)
+- Sois EXTREMEMENT conservateur: en cas de doute, n'ajoute rien"""
 
 class ProfileUpdater:
     """Mini IA pour mettre à jour les profils utilisateur."""

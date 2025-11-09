@@ -30,27 +30,26 @@ NOUVEAUX MESSAGES:
 
 REGLE #1: Le champ "content" contient UNIQUEMENT le profil en texte brut. PAS de prefixes comme "Ajout:", "Information:", etc.
 
-REGLE #2: Garde SEULEMENT les infos utiles long terme:
-- Prenom, metier, ville/pays
-- Preferences de ton (tutoiement, niveau detail, sujets a eviter)
-- Competences techniques importantes
+REGLE #2: Garder SEULEMENT les infos utiles long terme:
+- Prénom, métier, ville/pays, sexe, age, etc.
+- Préférences de ton (tutoiement, niveau detail, sujets à éviter)
+- Competences techniques, passions, centres d'interet, etc.
 - Contraintes durables
 
 REGLE #3: IGNORE tout le reste:
-- Age, gouts temporaires, projets ponctuels
-- Descriptions physiques, preferences esthetiques
+- Goûts temporaires, projets ponctuels
 - Actions du moment, infos sur d'autres personnes
 
-REGLE #4: N'ecris QUE ce qui est EXPLICITEMENT dit. Aucune supposition.
+REGLE #4: N'écris QUE ce qui est EXPLICITEMENT dit. Aucune supposition, aucune interprétation.
 
 REGLE #5: Profite pour NETTOYER le profil actuel:
 - Supprime les infos devenues inutiles ou obsoletes
 - Fusionne les doublons
-- Garde seulement l'essentiel
+- Garde seulement l'essentiel sans perte d'informations
 
-REGLE #6: Si aucune nouvelle info ET profil deja propre: mets "no_change" a true et recopie le profil actuel.
+REGLE #6: Si aucune nouvelle info ET profil déjà propre: mets "no_change" à true et recopie le profil actuel.
 
-FORMAT: Phrases courtes, style telegraphique, 400-700 caracteres."""
+FORMAT: Phrases courtes et concises, style télégraphique, 400-700 caractères."""
 
 class ProfileUpdater:
     """Mini IA pour mettre à jour les profils utilisateur."""

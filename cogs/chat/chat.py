@@ -156,20 +156,11 @@ class MemoryProfileView(ui.LayoutView):
         # Profile content
         profile_text = ui.TextDisplay(f">>> {profile.content}")
         container.add_item(profile_text)
-        container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.small))
-        
-        # Metadata
-        messages_count = profile.messages_since_update
-        last_update = profile.updated_at.strftime("%d/%m/%Y à %H:%M")
-        
-        meta_text = f"**Dernière mise à jour** · {last_update}\n"
-        meta_text += f"**Messages depuis** · {messages_count}"
-        meta_display = ui.TextDisplay(meta_text)
-        container.add_item(meta_display)
         
         # Footer
         container.add_item(ui.Separator())
-        footer = ui.TextDisplay("-# Utilisez /memory reset pour effacer ces informations")
+        last_update = profile.updated_at.strftime("%d/%m/%y %H:%M")
+        footer = ui.TextDisplay(f"-# Mis à jour le {last_update} · **/memory reset** pour effacer")
         container.add_item(footer)
         
         self.add_item(container)

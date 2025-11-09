@@ -11,35 +11,46 @@ logger = logging.getLogger('MARI4.memory.updater')
 
 # Modèle économique pour les mises à jour
 UPDATE_MODEL = 'gpt-4.1-nano'
-MAX_TOKENS = 300  # Limite pour le profil
+MAX_TOKENS = 500  # Limite pour le profil
 
 # Schéma Pydantic pour le profil
 class UserProfileSchema(BaseModel):
     """Schéma structuré pour les profils utilisateurs."""
-    identite: str  # Nom/pseudo, âge, localisation
-    activite: str  # Études/travail, projets en cours
-    tech: str  # Langages, outils, frameworks, compétences techniques
-    preferences: str  # Goûts, aversions, habitudes
-    contexte: str  # Autres informations pertinentes
+    identite: str = ""  # Nom/pseudo, âge, localisation
+    activite: str = ""  # Études/travail, projets en cours
+    tech: str = ""  # Langages, outils, frameworks, compétences techniques
+    preferences: str = ""  # Goûts, aversions, habitudes
+    contexte: str = ""  # Autres informations pertinentes
     no_change: bool = False  # True si aucune nouvelle info
 
 # Prompt strict pour éviter les hallucinations
 PROFILE_UPDATE_PROMPT = """Tu dois mettre à jour un profil utilisateur pour une IA.
 
-RÈGLES STRICTES:
-1. N'écris QUE des faits explicitement mentionnés par l'utilisateur dans les messages récents
-2. JAMAIS d'inférence ou de supposition
-3. Si aucune nouvelle info pertinente → met "no_change" à true et garde les valeurs actuelles
-4. Chaque champ doit être concis mais informatif
-5. Si un champ n'a pas d'info, laisse-le vide ""
-
-Profil actuel:
+PROFIL ACTUEL:
 {current_profile}
 
-Derniers messages de l'utilisateur:
+NOUVEAUX MESSAGES:
 {messages}
 
-Mets à jour les champs avec les nouvelles informations trouvées, ou indique no_change=true si rien de nouveau."""
+INSTRUCTIONS:
+1. Analyse les nouveaux messages pour trouver des infos personnelles (nom, âge, métier, compétences, préférences, etc.)
+2. Si tu trouves des nouvelles infos OU des modifications aux infos existantes:
+   - Mets à jour les champs concernés en FUSIONNANT avec le profil actuel
+   - Met "no_change" à FALSE
+   - Garde les infos existantes qui ne changent pas
+3. Si AUCUNE nouvelle info pertinente dans les messages:
+   - Met "no_change" à TRUE
+   - Remplis quand même tous les champs avec le contenu actuel (copie-le)
+
+RÈGLES:
+- N'écris QUE des faits explicitement mentionnés
+- JAMAIS d'inférence ou de supposition
+- Sois concis mais complet
+- Si un champ n'a jamais eu d'info, laisse-le vide ""
+
+Exemple: Si l'utilisateur dit "j'ai 25 ans" et le profil actuel dit "Nom: Jean", tu dois mettre:
+identite: "Nom: Jean, 25 ans"
+no_change: false"""
 
 class ProfileUpdater:
     """Mini IA pour mettre à jour les profils utilisateur."""
@@ -56,13 +67,15 @@ class ProfileUpdater:
     async def update_profile(
         self, 
         current_profile: Optional[str], 
-        messages: list[discord.Message]
+        messages: list[discord.Message],
+        force: bool = False
     ) -> Optional[str]:
         """Met à jour un profil utilisateur.
         
         Args:
             current_profile: Profil actuel (None si première fois)
             messages: Derniers messages de l'utilisateur
+            force: Si True, ignore le flag no_change
             
         Returns:
             Nouveau profil ou None si aucun changement
@@ -73,6 +86,9 @@ class ProfileUpdater:
         # Préparer le contexte
         current = current_profile or "Aucune information pour l'instant."
         messages_text = self._format_messages(messages)
+        
+        logger.debug(f"Mise à jour profil - {len(messages)} messages, force={force}")
+        logger.debug(f"Messages: {messages_text[:200]}...")
         
         # Appel à la mini IA avec structured output
         try:
@@ -98,9 +114,11 @@ class ProfileUpdater:
             
             parsed = response.choices[0].message.parsed
             
-            # Si aucun changement
-            if parsed.no_change:
-                logger.debug("Aucun changement détecté")
+            logger.debug(f"Réponse mini-IA: no_change={parsed.no_change}, identite={parsed.identite[:50] if parsed.identite else 'vide'}...")
+            
+            # Si aucun changement (sauf si force=True)
+            if parsed.no_change and not force:
+                logger.debug("Aucun changement détecté par la mini-IA")
                 return None
             
             # Construire le profil formaté
@@ -144,8 +162,11 @@ class ProfileUpdater:
     def _format_messages(self, messages: list[discord.Message]) -> str:
         """Formate les messages pour le prompt."""
         formatted = []
-        for msg in messages[-15:]:  # Max 15 derniers messages
-            formatted.append(f"- {msg.content}")
+        for msg in reversed(messages[-15:]):  # Max 15 derniers messages, du plus ancien au plus récent
+            # Extraire juste le texte, sans les métadonnées Discord
+            content = msg.content.strip()
+            if content:
+                formatted.append(f"- {content}")
         return '\n'.join(formatted)
     
     async def close(self):

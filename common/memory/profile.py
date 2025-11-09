@@ -10,9 +10,9 @@ logger = logging.getLogger('MARI4.memory.profile')
 
 @dataclass
 class UserProfile:
-    """Profil d'un utilisateur."""
+    """Profil utilisateur avec compteur de messages pour mises à jour automatiques."""
     user_id: int
-    content: str  # Contenu du profil (max 150 mots)
+    content: str
     created_at: datetime
     updated_at: datetime
     messages_since_update: int = 0

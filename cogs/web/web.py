@@ -67,7 +67,7 @@ class Web(commands.Cog):
         self.GLOBAL_TOOLS = [
             Tool(
                 name='search_and_read',
-                description='Recherche sur le web ET lit automatiquement la page la plus pertinente. Outil principal pour obtenir des infos récentes.',
+                description='Recherche sur le web ET lit automatiquement les pages pertinentes. Utilise pour toute info récente ou inconnue.',
                 properties={
                     'query': {'type': 'string', 'description': 'Requête de recherche concise'},
                     'lang': {'type': 'string', 'description': 'Code langue (fr, en, es, etc.). Par défaut: fr', 'default': 'fr'}

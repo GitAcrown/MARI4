@@ -65,18 +65,14 @@ class MemoryManager:
         """Worker qui traite les mises à jour en arrière-plan."""
         while True:
             try:
-                # Attendre une mise à jour dans la queue
                 user_id, messages = await self._update_queue.get()
                 
-                # Récupérer le profil actuel
                 profile = self.get_profile(user_id)
                 current_content = profile.content if profile else None
                 
-                # Mettre à jour avec la mini IA
                 new_content = await self.updater.update_profile(current_content, messages)
                 
                 if new_content:
-                    # Sauvegarder
                     if profile:
                         profile.content = new_content
                         profile.reset_counter()
@@ -96,22 +92,20 @@ class MemoryManager:
                 
             except Exception as e:
                 logger.error(f"Erreur background updater: {e}")
-                await asyncio.sleep(5)  # Pause avant de réessayer
+                await asyncio.sleep(5)
     
     def get_profile(self, user_id: int) -> Optional[UserProfile]:
-        """Récupère le profil d'un utilisateur.
+        """Récupère le profil d'un utilisateur (cache + DB).
         
         Args:
             user_id: ID de l'utilisateur Discord
             
         Returns:
-            UserProfile ou None si pas de profil
+            UserProfile ou None
         """
-        # Vérifier le cache
         if user_id in self._profiles:
             return self._profiles[user_id]
         
-        # Charger depuis la DB
         cursor = self.conn.execute(
             'SELECT * FROM user_profiles WHERE user_id = ?',
             (user_id,)
@@ -153,10 +147,9 @@ class MemoryManager:
         if profile:
             profile.increment_messages()
             self._save_profile(profile)
-        # Si pas de profil, check_and_schedule_update créera le premier profil
     
     async def check_and_schedule_update(self, user_id: int, recent_messages: list[discord.Message]):
-        """Vérifie si une mise à jour automatique est nécessaire et la planifie.
+        """Vérifie si une MAJ automatique est nécessaire et la planifie.
         
         Args:
             user_id: ID de l'utilisateur Discord
@@ -164,36 +157,31 @@ class MemoryManager:
         """
         profile = self.get_profile(user_id)
         
-        # Première fois ou besoin de mise à jour automatique
         if profile is None or profile.should_update():
-            # Ajouter à la queue (non-bloquant)
             await self._update_queue.put((user_id, recent_messages))
-            logger.debug(f"Mise à jour automatique planifiée pour user {user_id}")
+            logger.debug(f"MAJ automatique planifiée pour user {user_id}")
     
     async def force_update(self, user_id: int, recent_messages: list[discord.Message]) -> bool:
-        """Force une mise à jour immédiate et synchrone du profil (appelé par l'IA).
+        """Force une MAJ immédiate et synchrone du profil (appelé par l'IA).
         
         Args:
             user_id: ID de l'utilisateur Discord
             recent_messages: Messages récents de l'utilisateur
             
         Returns:
-            True si la mise à jour a réussi, False sinon
+            True si succès, False sinon
         """
         if not recent_messages:
-            logger.warning(f"Force update demandée pour user {user_id} mais pas de messages")
+            logger.warning(f"Force update sans messages pour user {user_id}")
             return False
         
         try:
-            # Mise à jour synchrone (pas via la queue)
             profile = self.get_profile(user_id)
             current_content = profile.content if profile else None
             
-            # Mettre à jour avec la mini IA
-            new_content = await self.updater.update_profile(current_content, recent_messages)
+            new_content = await self.updater.update_profile(current_content, recent_messages, force=True)
             
             if new_content:
-                # Sauvegarder
                 if profile:
                     profile.content = new_content
                     profile.reset_counter()
@@ -207,10 +195,10 @@ class MemoryManager:
                     )
                 
                 self._save_profile(profile)
-                logger.info(f"Profil mis à jour immédiatement pour user {user_id} (déclenché par l'IA)")
+                logger.info(f"Profil MAJ immédiate pour user {user_id} (IA)")
                 return True
             else:
-                logger.info(f"Aucune nouvelle info pour user {user_id}")
+                logger.debug(f"Aucune nouvelle info pour user {user_id}")
                 return False
                 
         except Exception as e:

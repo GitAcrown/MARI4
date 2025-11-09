@@ -36,14 +36,15 @@ STYLE & COMPORTEMENT:
 • Peux donner avis et opinions librement si le contexte s'y prête
 
 MÉMOIRE:
-• Si l'utilisateur partage des infos importantes sur lui (nom, âge, métier, préférences, etc.), utilise update_user_profile
-• Ça permet de te souvenir de lui pour les prochaines conversations
-• Ne l'utilise que pour des infos durables, pas pour des trucs temporaires
+• Quand l'auteur du message partage des infos importantes sur lui (nom, âge, métier, préférences, etc.), utilise update_user_profile automatiquement
+• Ne demande JAMAIS la permission, fais-le naturellement
+• Uniquement pour l'auteur du message, JAMAIS pour d'autres personnes mentionnées
 
 RECHERCHE:
 • Info récente inconnue ? Utilise search_and_read (cherche + lit automatiquement)
 • Si l'utilisateur donne une URL précise, utilise read_web_page
 • Adapte la langue de recherche au contexte
+• Fais confiance aux résultats, ne dis JAMAIS que tu n'as pas accès à internet
 
 FORMAT:
 Messages utilisateurs : "[id] username (user_id) : message"
@@ -174,7 +175,9 @@ class MemoryProfileView(ui.LayoutView):
                     container.add_item(field_display)
         
         container.add_item(ui.Separator())
-        last_update = profile.updated_at.strftime("%d/%m/%y %H:%M")
+        # Convertir UTC vers Paris
+        last_update_paris = profile.updated_at.astimezone(PARIS_TZ)
+        last_update = last_update_paris.strftime("%d/%m/%y %H:%M")
         footer = ui.TextDisplay(f"-# Mis à jour le {last_update} · **/memory reset** pour effacer")
         container.add_item(footer)
         
@@ -202,13 +205,10 @@ class Chat(commands.Cog):
         self.memory = MemoryManager(api_key=self.bot.config['OPENAI_API_KEY'])
         self.memory.start_background_updater()
         
-        # Utilisateur actuel pour le prompt (thread-local via channel)
-        self._current_user_profiles = {}  # {channel_id: user_profile_text}
-        
-        # Fonction pour générer le prompt développeur
+        # Fonction pour générer le prompt système dynamiquement
         def get_developer_prompt():
+            """Génère le prompt système avec date/heure actuelle et profils utilisateurs."""
             now = datetime.now(PARIS_TZ)
-            # Récupérer le profil utilisateur si disponible (sera set avant completion)
             user_profile = getattr(get_developer_prompt, '_user_profile', '')
             return DEVELOPER_PROMPT_TEMPLATE({
                 'weekday': now.strftime('%A'),
@@ -258,15 +258,10 @@ class Chat(commands.Cog):
         update_profile_tool = Tool(
             name='update_user_profile',
             description=(
-                "Enregistre les infos importantes de l'utilisateur pour s'en souvenir (nom, âge, métier, préférences, compétences). "
-                "Utilise dès qu'il partage des infos personnelles durables, pas pour des trucs temporaires."
+                "Enregistre automatiquement les infos importantes de l'AUTEUR du message (nom, âge, métier, préférences, compétences). "
+                "Utilise dès qu'il partage des infos personnelles durables. JAMAIS pour d'autres personnes."
             ),
-            properties={
-                'reason': {
-                    'type': 'string',
-                    'description': 'Raison courte (ex: "nom et métier")'
-                }
-            },
+            properties={},
             function=self._tool_update_user_profile
         )
         tools.append(update_profile_tool)
@@ -278,10 +273,10 @@ class Chat(commands.Cog):
     # OUTILS ------------------------------------------------------
     
     async def _tool_update_user_profile(self, tool_call: ToolCallRecord, context_data) -> ToolResponseRecord:
-        """Outil pour l'IA : met à jour le profil de l'utilisateur."""
-        reason = tool_call.arguments.get('reason', 'Mise à jour manuelle')
+        """Met à jour le profil de l'auteur du message avec les infos récentes.
         
-        # Récupérer le trigger_message depuis la session
+        Appelé par l'IA quand l'utilisateur partage des infos personnelles importantes.
+        """
         if not context_data or not hasattr(context_data, 'trigger_message') or not context_data.trigger_message:
             return ToolResponseRecord(
                 tool_call_id=tool_call.id,
@@ -291,7 +286,9 @@ class Chat(commands.Cog):
         
         trigger_message = context_data.trigger_message
         user_id = trigger_message.author.id
+        user_name = trigger_message.author.name
         
+        # Récupérer les 20 derniers messages de l'utilisateur
         recent_messages = []
         async for msg in trigger_message.channel.history(limit=20):
             if msg.author.id == user_id and not msg.author.bot:
@@ -307,12 +304,12 @@ class Chat(commands.Cog):
         success = await self.memory.force_update(user_id, recent_messages)
         
         if success:
-            logger.info(f"Profil de {trigger_message.author.name} mis à jour par l'IA. Raison: {reason}")
+            logger.info(f"Profil de {user_name} mis à jour par l'IA")
             return ToolResponseRecord(
                 tool_call_id=tool_call.id,
                 response_data={'result': "Profil mis à jour avec succès."},
                 created_at=datetime.now(timezone.utc),
-                metadata={'header': f"Mise à jour profil → {reason}"}
+                metadata={'header': f"Mise à jour du profil de {user_name}"}
             )
         else:
             return ToolResponseRecord(
@@ -433,24 +430,22 @@ class Chat(commands.Cog):
         # Injecter les profils utilisateurs pertinents dans le prompt
         profiles_to_inject = []
         
-        # 1. Profil de l'auteur du message (toujours)
+        # 1. Profil de l'auteur (toujours prioritaire)
         author_profile = self.memory.get_profile_text(message.author.id)
         if author_profile:
-            profiles_to_inject.append(f"**{message.author.name}** (auteur du message):\n{author_profile}")
+            profiles_to_inject.append(f"**{message.author.name}** (auteur):\n{author_profile}")
         
         # 2. Profils des utilisateurs mentionnés
         for mentioned_user in message.mentions:
-            if mentioned_user.bot:
+            if mentioned_user.bot or mentioned_user.id == message.author.id:
                 continue
-            if mentioned_user.id == message.author.id:
-                continue  # Déjà ajouté
             
             mentioned_profile = self.memory.get_profile_text(mentioned_user.id)
             if mentioned_profile:
                 profiles_to_inject.append(f"**{mentioned_user.name}** (mentionné):\n{mentioned_profile}")
         
-        # 3. Profils des utilisateurs récemment actifs dans la conversation (max 2 derniers)
-        if not message.mentions:  # Seulement si pas de mentions explicites
+        # 3. Profils des utilisateurs récemment actifs (max 2, seulement si pas de mentions)
+        if not message.mentions:
             recent_users = set()
             async for msg in message.channel.history(limit=10):
                 if msg.author.bot or msg.author.id == message.author.id:
@@ -462,11 +457,11 @@ class Chat(commands.Cog):
             for recent_user in recent_users:
                 recent_profile = self.memory.get_profile_text(recent_user.id)
                 if recent_profile:
-                    profiles_to_inject.append(f"**{recent_user.name}** (récemment actif):\n{recent_profile}")
+                    profiles_to_inject.append(f"**{recent_user.name}** (actif):\n{recent_profile}")
         
-        # Construire le texte final
+        # Injecter dans le prompt système
         if profiles_to_inject:
-            self._get_developer_prompt._user_profile = "PROFILS DES UTILISATEURS:\n\n" + "\n\n".join(profiles_to_inject) + "\n"
+            self._get_developer_prompt._user_profile = "PROFILS:\n\n" + "\n\n".join(profiles_to_inject) + "\n"
         else:
             self._get_developer_prompt._user_profile = ''
         
@@ -478,34 +473,23 @@ class Chat(commands.Cog):
                     trigger_message=message
                 )
                 
-                # Gestion de la mémoire après réponse
-                # Récupérer les messages récents de l'utilisateur
+                # Gestion de la mémoire : incrémenter compteur et planifier MAJ si nécessaire
                 recent_messages = []
                 async for msg in message.channel.history(limit=20):
                     if msg.author.id == message.author.id and not msg.author.bot:
                         recent_messages.append(msg)
                 
                 if recent_messages:
-                    # Incrémenter le compteur et vérifier si mise à jour nécessaire
                     self.memory.increment_message_count(message.author.id)
                     await self.memory.check_and_schedule_update(message.author.id, recent_messages)
                 
-                # Formater la réponse avec les headers des tools
+                # Formater la réponse avec headers des outils
                 text = response.text
-                
-                # Ajouter les headers des tools utilisés
                 if response.tool_responses:
-                    headers = []
-                    for tool_resp in response.tool_responses:
-                        header = tool_resp.metadata.get('header')
-                        if header:
-                            headers.append(header)
-                    
+                    headers = [tr.metadata.get('header') for tr in response.tool_responses if tr.metadata.get('header')]
                     if headers:
-                        # Dédupliquer et inverser l'ordre
-                        headers = list(dict.fromkeys(headers))
-                        headers_text = '\n-# ' + '\n-# '.join(headers) + '\n'
-                        text = headers_text + text
+                        headers = list(dict.fromkeys(headers))  # Dédupliquer
+                        text = '\n-# ' + '\n-# '.join(headers) + '\n' + text
                 
                 # Décider si on utilise reply ou message normal
                 use_reply = await self.should_use_reply(message)
@@ -717,12 +701,12 @@ class Chat(commands.Cog):
         
         if success:
             await interaction.response.send_message(
-                "✅ Toutes vos informations ont été effacées.",
+                "Toutes vos informations ont été effacées.",
                 ephemeral=True
             )
         else:
             await interaction.response.send_message(
-                "❌ Aucune information à effacer.",
+                "Aucune information à effacer.",
                 ephemeral=True
             )
  

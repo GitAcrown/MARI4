@@ -163,76 +163,6 @@ class Web(commands.Cog):
             logger.error(f"Erreur recherche web: {e}")
             return []
     
-    def search_images(self, query: str, lang: str = 'fr', num_results: int = 5) -> List[Dict]:
-        """Recherche des images avec DDGS."""
-        try:
-            with DDGS() as ddgs:
-                results = ddgs.images(
-                    query=query,
-                    region=f'{lang}-{lang}',
-                    max_results=min(num_results, 10)
-                )
-                return [
-                    {
-                        'title': r.get('title', ''),
-                        'image_url': r.get('image', ''),
-                        'thumbnail': r.get('thumbnail', ''),
-                        'source_url': r.get('url', ''),
-                        'dimensions': f"{r.get('width', 'N/A')}x{r.get('height', 'N/A')}"
-                    }
-                    for r in results
-                ]
-        except Exception as e:
-            logger.error(f"Erreur recherche images: {e}")
-            return []
-    
-    def search_videos(self, query: str, lang: str = 'fr', num_results: int = 5) -> List[Dict]:
-        """Recherche des vidéos avec DDGS."""
-        try:
-            with DDGS() as ddgs:
-                results = ddgs.videos(
-                    query=query,
-                    region=f'{lang}-{lang}',
-                    max_results=min(num_results, 10)
-                )
-                return [
-                    {
-                        'title': r.get('title', ''),
-                        'url': r.get('content', ''),
-                        'description': r.get('description', ''),
-                        'duration': r.get('duration', ''),
-                        'uploader': r.get('uploader', ''),
-                        'published': r.get('published', '')
-                    }
-                    for r in results
-                ]
-        except Exception as e:
-            logger.error(f"Erreur recherche vidéos: {e}")
-            return []
-    
-    def search_news(self, query: str, lang: str = 'fr', num_results: int = 5) -> List[Dict]:
-        """Recherche des actualités avec DDGS."""
-        try:
-            with DDGS() as ddgs:
-                results = ddgs.news(
-                    query=query,
-                    region=f'{lang}-{lang}',
-                    max_results=min(num_results, 10)
-                )
-                return [
-                    {
-                        'title': r.get('title', ''),
-                        'url': r.get('url', ''),
-                        'description': r.get('body', ''),
-                        'date': r.get('date', ''),
-                        'source': r.get('source', '')
-                    }
-                    for r in results
-                ]
-        except Exception as e:
-            logger.error(f"Erreur recherche actualités: {e}")
-            return []
-    
     def fetch_page_chunks(self, url: str, chunk_size: int = DEFAULT_CHUNK_SIZE) -> List[str]:
         """Récupère et divise le contenu d'une page web."""
         # Vérifier le cache
@@ -345,7 +275,7 @@ class Web(commands.Cog):
             'note': 'Si les extraits sont insuffisants, utilise read_web_page sur une URL specifique pour plus de details.'
         }
         
-        header = f'Recherche ⸱ "{query}"'
+        header = f'Recherche de "{query}"'
         
         return ToolResponseRecord(
             tool_call_id=tool_call.id,
@@ -394,7 +324,7 @@ class Web(commands.Cog):
                 'total_chunks_available': len(chunks)
             },
             created_at=datetime.now(timezone.utc),
-            metadata={'header': f'Lecture ⸱ [{domain}](<{url}>)'}
+            metadata={'header': f'Lecture de [{domain}](<{url}>)'}
         )
 
 async def setup(bot):

@@ -720,6 +720,99 @@ class Chat(commands.Cog):
         # Ouvrir le modal directement
         modal = ProfileModal(self.memory, interaction.user.id, current_content)
         await interaction.response.send_modal(modal)
+    
+    # COMMANDES ADMIN (prefix commands) ------------------------------
+    
+    @commands.command(name='profiles')
+    @commands.is_owner()
+    async def cmd_profiles(self, ctx: commands.Context):
+        """[Admin] Liste tous les profils enregistrés."""
+        stats = self.memory.get_stats()
+        
+        if stats['total_profiles'] == 0:
+            await ctx.send("Aucun profil enregistré.")
+            return
+        
+        # Récupérer tous les profils
+        cursor = self.memory.conn.execute(
+            'SELECT user_id, content, updated_at, messages_since_update FROM user_profiles ORDER BY updated_at DESC LIMIT 20'
+        )
+        rows = cursor.fetchall()
+        
+        output = f"**Profils enregistrés** ({stats['total_profiles']} total, 20 derniers)\n\n"
+        
+        for row in rows:
+            user_id = row['user_id']
+            content = row['content']
+            updated_at = datetime.fromisoformat(row['updated_at'])
+            messages_since = row['messages_since_update']
+            
+            # Essayer de récupérer le nom de l'utilisateur
+            try:
+                user = await self.bot.fetch_user(user_id)
+                user_name = user.name
+            except:
+                user_name = f"User {user_id}"
+            
+            # Convertir en heure de Paris
+            updated_paris = updated_at.astimezone(PARIS_TZ)
+            time_str = updated_paris.strftime("%d/%m %H:%M")
+            
+            # Tronquer le contenu
+            preview = content[:100] + "..." if len(content) > 100 else content
+            
+            output += f"**{user_name}** (`{user_id}`)\n"
+            output += f"MAJ: {time_str} · Messages: {messages_since}\n"
+            output += f"{preview}\n\n"
+            
+            # Découper si trop long
+            if len(output) > 1800:
+                await ctx.send(output)
+                output = ""
+        
+        if output:
+            await ctx.send(output)
+    
+    @commands.command(name='profile')
+    @commands.is_owner()
+    async def cmd_profile(self, ctx: commands.Context, user_id: int):
+        """[Admin] Affiche le profil complet d'un utilisateur."""
+        profile = self.memory.get_profile(user_id)
+        
+        if not profile:
+            await ctx.send(f"Aucun profil pour l'utilisateur `{user_id}`.")
+            return
+        
+        # Essayer de récupérer le nom
+        try:
+            user = await self.bot.fetch_user(user_id)
+            user_name = user.name
+        except:
+            user_name = f"User {user_id}"
+        
+        # Convertir les dates
+        created_paris = profile.created_at.astimezone(PARIS_TZ)
+        updated_paris = profile.updated_at.astimezone(PARIS_TZ)
+        
+        output = f"**Profil de {user_name}** (`{user_id}`)\n\n"
+        output += f"**Créé:** {created_paris.strftime('%d/%m/%Y à %H:%M')}\n"
+        output += f"**Mis à jour:** {updated_paris.strftime('%d/%m/%Y à %H:%M')}\n"
+        output += f"**Messages depuis MAJ:** {profile.messages_since_update}\n\n"
+        output += f"**Contenu:**\n{profile.content}"
+        
+        # Découper si nécessaire
+        if len(output) <= 2000:
+            await ctx.send(output)
+        else:
+            chunks = []
+            while len(output) > 2000:
+                chunk = output[:2000]
+                output = output[2000:]
+                chunks.append(chunk)
+            chunks.append(output)
+            
+            for chunk in chunks:
+                await ctx.send(chunk)
  
 async def setup(bot):
     await bot.add_cog(Chat(bot))

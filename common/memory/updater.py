@@ -82,7 +82,6 @@ class ProfileUpdater:
             api_key: Clé API OpenAI
         """
         self.client = AsyncOpenAI(api_key=api_key)
-        logger.info("ProfileUpdater initialisé")
     
     async def update_profile(
         self, 
@@ -106,9 +105,6 @@ class ProfileUpdater:
         # Préparer le contexte
         current = current_profile or "Aucune information pour l'instant."
         messages_text = self._format_messages(messages)
-        
-        logger.debug(f"Mise à jour profil - {len(messages)} messages, force={force}")
-        logger.debug(f"Messages: {messages_text[:200]}...")
         
         # Appel à la mini IA avec structured output
         try:
@@ -134,11 +130,8 @@ class ProfileUpdater:
             
             parsed = response.choices[0].message.parsed
             
-            logger.debug(f"Réponse mini-IA: no_change={parsed.no_change}, content={parsed.content[:50] if parsed.content else 'vide'}...")
-            
             # Si aucun changement (sauf si force=True)
             if parsed.no_change and not force:
-                logger.debug("Aucun changement détecté par la mini-IA")
                 return None
             
             # Construire le profil formaté
@@ -149,7 +142,18 @@ class ProfileUpdater:
                 logger.warning("Profil trop court")
                 return None
             
-            logger.info(f"Profil mis à jour: {len(new_profile)} caractères")
+            # Logger les changements
+            if current_profile and current_profile != "Aucune information pour l'instant.":
+                # Calculer ce qui a été ajouté (approximatif)
+                old_length = len(current_profile)
+                new_length = len(new_profile)
+                diff = new_length - old_length
+                logger.info(f"Profil mis a jour: {new_length} caracteres ({diff:+d} caracteres)")
+                logger.debug(f"Nouveau contenu: {new_profile[:200]}...")
+            else:
+                logger.info(f"Profil cree: {len(new_profile)} caracteres")
+                logger.debug(f"Contenu initial: {new_profile[:200]}...")
+            
             return new_profile
             
         except Exception as e:

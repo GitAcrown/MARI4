@@ -228,22 +228,22 @@ class MemoryProfileView(ui.LayoutView):
         container.add_item(header)
         container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.large))
         
-        # Afficher le contenu du profil
+        # Afficher le contenu du profil avec bouton Modifier
         content_display = ui.TextDisplay(profile.content.strip())
-        container.add_item(content_display)
+        edit_button = ProfileEditButton()
+        content_section = ui.Section(content_display, accessory=edit_button)
+        container.add_item(content_section)
         
         container.add_item(ui.Separator())
         # Convertir UTC vers Paris
         last_update_paris = profile.updated_at.astimezone(PARIS_TZ)
         last_update = last_update_paris.strftime("%d/%m/%y %H:%M")
-        footer = ui.TextDisplay(f"-# Mis à jour le {last_update}")
-        container.add_item(footer)
+        footer_text = ui.TextDisplay(f"-# Mis à jour le {last_update}")
+        reset_button = ProfileResetButton()
+        footer_section = ui.Section(footer_text, accessory=reset_button)
+        container.add_item(footer_section)
         
         self.add_item(container)
-        
-        # Boutons d'action
-        self.add_item(ProfileEditButton())
-        self.add_item(ProfileResetButton())
 
 # COG -------------------------------------------------------------
 

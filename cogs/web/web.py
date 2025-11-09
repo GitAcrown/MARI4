@@ -66,19 +66,19 @@ class Web(commands.Cog):
         # Outils globaux exportés
         self.GLOBAL_TOOLS = [
             Tool(
-                name='search_and_read',
-                description='Recherche sur le web ET lit automatiquement les pages pertinentes. Utilise pour toute info récente ou inconnue.',
+                name='search_web',
+                description='Recherche sur le web et retourne des resultats avec extraits. Utilise pour toute info recente ou inconnue. Si besoin de plus de details, utilise ensuite read_web_page sur une URL specifique.',
                 properties={
-                    'query': {'type': 'string', 'description': 'Requête de recherche concise'},
-                    'lang': {'type': 'string', 'description': 'Code langue (fr, en, es, etc.). Par défaut: fr', 'default': 'fr'}
+                    'query': {'type': 'string', 'description': 'Requete de recherche concise'},
+                    'lang': {'type': 'string', 'description': 'Code langue (fr, en, es, etc.). Par defaut: fr', 'default': 'fr'}
                 },
-                function=self._tool_search_and_read
+                function=self._tool_search_web
             ),
             Tool(
                 name='read_web_page',
-                description='Lit le contenu d\'une URL spécifique. Utilise seulement si tu as déjà une URL précise (ex: donnée par l\'utilisateur).',
+                description='Lit le contenu complet d\'une URL specifique. Utilise si: 1) l\'utilisateur donne une URL, 2) les extraits de search_web sont insuffisants et tu veux approfondir.',
                 properties={
-                    'url': {'type': 'string', 'description': 'URL complète de la page'}
+                    'url': {'type': 'string', 'description': 'URL complete de la page'}
                 },
                 function=self._tool_read_web_page
             )
@@ -315,69 +315,37 @@ class Web(commands.Cog):
     
     # OUTILS ----------------------------------------------------------
     
-    def _tool_search_and_read(self, tool_call: ToolCallRecord, context_data) -> ToolResponseRecord:
-        """Outil combiné : recherche + lecture automatique de la meilleure page."""
+    def _tool_search_web(self, tool_call: ToolCallRecord, context_data) -> ToolResponseRecord:
+        """Outil de recherche web avec extraits enrichis."""
         query = tool_call.arguments.get('query')
         lang = tool_call.arguments.get('lang', 'fr')
         
         if not query:
             return ToolResponseRecord(
                 tool_call_id=tool_call.id,
-                response_data={'error': 'Requête manquante'},
+                response_data={'error': 'Requete manquante'},
                 created_at=datetime.now(timezone.utc)
             )
         
         # Recherche
-        results = self.search_web_pages(query, lang, 3)
+        results = self.search_web_pages(query, lang, 5)
         
         if not results:
             return ToolResponseRecord(
                 tool_call_id=tool_call.id,
-                response_data={'error': 'Aucun résultat trouvé'},
+                response_data={'error': 'Aucun resultat trouve'},
                 created_at=datetime.now(timezone.utc)
             )
         
-        # Essayer de lire les pages dans l'ordre jusqu'à en trouver une qui marche
-        page_content = None
-        successful_url = None
-        failed_urls = []
-        
-        for result in results:
-            url = result.get('url')
-            if not url:
-                continue
-            
-            try:
-                chunks = self.fetch_page_chunks(url)
-                if chunks and len(chunks[0]) > 100:  # Contenu valide
-                    page_content = chunks[0]
-                    successful_url = url
-                    break
-                else:
-                    failed_urls.append(url)
-            except Exception as e:
-                logger.warning(f"Erreur lecture {url}: {e}")
-                failed_urls.append(url)
-        
-        # Construire la réponse
+        # Construire la réponse avec les résultats enrichis
         response_data = {
             'query': query,
-            'search_results': results,
-            'total_results': len(results)
+            'results': results,
+            'total': len(results),
+            'note': 'Si les extraits sont insuffisants, utilise read_web_page sur une URL specifique pour plus de details.'
         }
         
-        if page_content and successful_url:
-            # Succès : on a pu lire une page
-            response_data['page_content'] = page_content
-            response_data['page_url'] = successful_url
-            response_data['status'] = 'success'
-            domain = successful_url.split("//")[-1].split("/")[0]
-            header = f'Recherche ⸱ "{query}" → [{domain}](<{successful_url}>)'
-        else:
-            # Échec : aucune page lisible, on retourne juste les résultats de recherche
-            response_data['status'] = 'search_only'
-            response_data['note'] = 'Aucune page n\'a pu être lue automatiquement'
-            header = f'Recherche ⸱ "{query}" ({len(results)} résultats, pages non accessibles)'
+        header = f'Recherche ⸱ "{query}" ({len(results)} resultats)'
         
         return ToolResponseRecord(
             tool_call_id=tool_call.id,

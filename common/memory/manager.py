@@ -55,14 +55,11 @@ class MemoryManager:
         
         # Verrous pour éviter les race conditions lors des MAJ
         self._update_locks: Dict[int, asyncio.Lock] = {}
-        
-        logger.info("MemoryManager initialisé")
     
     def start_background_updater(self):
         """Démarre le worker de mise à jour en arrière-plan."""
         if self._update_task is None or self._update_task.done():
             self._update_task = asyncio.create_task(self._background_updater())
-            logger.info("Background updater démarré")
     
     async def _background_updater(self):
         """Worker qui traite les mises à jour en arrière-plan."""
@@ -94,7 +91,6 @@ class MemoryManager:
                             )
                         
                         self._save_profile(profile)
-                        logger.info(f"Profil mis à jour pour user {user_id}")
                 
                 self._update_queue.task_done()
                 
@@ -167,7 +163,6 @@ class MemoryManager:
         
         if profile is None or profile.should_update():
             await self._update_queue.put((user_id, recent_messages))
-            logger.debug(f"MAJ automatique planifiée pour user {user_id}")
     
     async def force_update(self, user_id: int, recent_messages: list[discord.Message]) -> bool:
         """Force une MAJ immédiate et synchrone du profil (appelé par l'IA).
@@ -208,10 +203,8 @@ class MemoryManager:
                         )
                     
                     self._save_profile(profile)
-                    logger.info(f"Profil MAJ immédiate pour user {user_id} (IA)")
                     return True
                 else:
-                    logger.debug(f"Aucune nouvelle info pour user {user_id}")
                     return False
                 
         except Exception as e:
@@ -234,7 +227,6 @@ class MemoryManager:
             )
             self.conn.commit()
             self._profiles.pop(user_id, None)
-            logger.info(f"Profil supprimé pour user {user_id}")
             return True
         except Exception as e:
             logger.error(f"Erreur suppression profil: {e}")
@@ -285,5 +277,4 @@ class MemoryManager:
             self._update_task.cancel()
         await self.updater.close()
         self.conn.close()
-        logger.info("MemoryManager fermé")
 

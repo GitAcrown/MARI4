@@ -34,6 +34,11 @@ STYLE & COMPORTEMENT:
 • Devine l'intention, ne demande pas de précisions
 • Peux donner avis et opinions librement si le contexte s'y prête
 
+MÉMOIRE:
+• Si l'utilisateur partage des infos importantes sur lui (nom, âge, métier, préférences, etc.), utilise update_user_profile
+• Ça permet de te souvenir de lui pour les prochaines conversations
+• Ne l'utilise que pour des infos durables, pas pour des trucs temporaires
+
 RECHERCHE:
 • Info récente inconnue ? Utilise search_and_read (cherche + lit automatiquement)
 • Si l'utilisateur donne une URL précise, utilise read_web_page
@@ -63,14 +68,12 @@ class InfoView(ui.LayoutView):
         
         container = ui.Container()
         
-        # Header
         header = ui.TextDisplay(f"## {bot.user.name}")
         container.add_item(header)
         subtitle = ui.TextDisplay("*Assistante IA pour Discord*")
         container.add_item(subtitle)
         container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.large))
         
-        # Session info
         session_title = ui.TextDisplay(f"### Session · {channel.name}")
         container.add_item(session_title)
         
@@ -88,7 +91,6 @@ class InfoView(ui.LayoutView):
         container.add_item(session_info)
         container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.small))
         
-        # Tools
         if tools:
             tools_title = ui.TextDisplay(f"### Outils disponibles · {len(tools)}")
             container.add_item(tools_title)
@@ -100,7 +102,6 @@ class InfoView(ui.LayoutView):
             container.add_item(tools_display)
             container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.small))
         
-        # Configuration
         config_title = ui.TextDisplay("### Configuration serveur")
         container.add_item(config_title)
         
@@ -114,7 +115,6 @@ class InfoView(ui.LayoutView):
         container.add_item(config_info)
         container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.small))
         
-        # Stats globales
         client_stats = global_stats['client_stats']
         session_stats = global_stats['session_stats']
         
@@ -129,11 +129,9 @@ class InfoView(ui.LayoutView):
         global_info = ui.TextDisplay(global_text)
         container.add_item(global_info)
         
-        # Thumbnail
         thumb = ui.Thumbnail(media=bot.user.display_avatar.url)
         container.add_item(thumb)
         
-        # Footer
         container.add_item(ui.Separator())
         footer = ui.TextDisplay("-# Utilisez /chatbot pour configurer MARIA")
         container.add_item(footer)
@@ -148,16 +146,13 @@ class MemoryProfileView(ui.LayoutView):
         
         container = ui.Container()
         
-        # Header
         header = ui.TextDisplay(f"## Votre carte d'identité")
         container.add_item(header)
         container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.large))
         
-        # Profile content
         profile_text = ui.TextDisplay(f">>> {profile.content}")
         container.add_item(profile_text)
         
-        # Footer
         container.add_item(ui.Separator())
         last_update = profile.updated_at.strftime("%d/%m/%y %H:%M")
         footer = ui.TextDisplay(f"-# Mis à jour le {last_update} · **/memory reset** pour effacer")
@@ -240,22 +235,19 @@ class Chat(commands.Cog):
                 tools.extend(cog.GLOBAL_TOOLS)
                 logger.info(f"Outils chargés depuis {cog.qualified_name}: {len(cog.GLOBAL_TOOLS)}")
         
-        # Ajouter l'outil de mise à jour de profil
         from common.llm import Tool
         update_profile_tool = Tool(
             name='update_user_profile',
             description=(
-                "Met à jour la carte d'identité de l'utilisateur avec qui tu discutes. "
-                "Utilise cet outil quand l'utilisateur partage des informations importantes sur lui "
-                "(nom, âge, préférences, activités, compétences, contexte personnel). "
-                "Ne l'utilise PAS pour des infos triviales ou temporaires."
+                "Enregistre les infos importantes de l'utilisateur pour s'en souvenir (nom, âge, métier, préférences, compétences). "
+                "Utilise dès qu'il partage des infos personnelles durables, pas pour des trucs temporaires."
             ),
             parameters={
                 'type': 'object',
                 'properties': {
                     'reason': {
                         'type': 'string',
-                        'description': 'Courte explication de pourquoi tu mets à jour le profil (ex: "L\'utilisateur a mentionné son métier")'
+                        'description': 'Raison courte (ex: "nom et métier")'
                     }
                 },
                 'required': ['reason']
@@ -270,35 +262,28 @@ class Chat(commands.Cog):
     
     # OUTILS ------------------------------------------------------
     
-    async def _tool_update_user_profile(self, reason: str, trigger_message: discord.Message) -> str:
-        """Outil pour l'IA : met à jour le profil de l'utilisateur.
-        
-        Args:
-            reason: Raison de la mise à jour
-            trigger_message: Message qui a déclenché l'outil
-            
-        Returns:
-            Message de confirmation
-        """
+    async def _tool_update_user_profile(self, reason: str, trigger_message: discord.Message) -> dict:
+        """Outil pour l'IA : met à jour le profil de l'utilisateur."""
         user_id = trigger_message.author.id
         
-        # Récupérer les messages récents de l'utilisateur
         recent_messages = []
         async for msg in trigger_message.channel.history(limit=20):
             if msg.author.id == user_id and not msg.author.bot:
                 recent_messages.append(msg)
         
         if not recent_messages:
-            return "Erreur: Aucun message récent trouvé."
+            return {'result': "Erreur: Aucun message récent trouvé.", 'metadata': {}}
         
-        # Forcer la mise à jour
         success = await self.memory.force_update(user_id, recent_messages)
         
         if success:
             logger.info(f"Profil de {trigger_message.author.name} mis à jour par l'IA. Raison: {reason}")
-            return f"Carte d'identité mise à jour. Raison: {reason}"
+            return {
+                'result': f"Carte d'identité mise à jour avec succès.",
+                'metadata': {'header': f"Mise à jour de la carte d'identité"}
+            }
         else:
-            return "Erreur lors de la mise à jour de la carte d'identité."
+            return {'result': "Erreur lors de la mise à jour de la carte d'identité.", 'metadata': {}}
     
     # CONFIGURATION -----------------------------------------------
     

@@ -21,8 +21,8 @@ logger = logging.getLogger(f'MARI4.{__name__.split(".")[-1]}')
 
 # CONSTANTES ------------------------------------------------------
 
-DEFAULT_CHUNK_SIZE = 1500  # Réduit pour des réponses plus concises
-DEFAULT_NUM_RESULTS = 3  # Réduit de 5 à 3 pour éviter les surcharges
+DEFAULT_CHUNK_SIZE = 2000
+DEFAULT_NUM_RESULTS = 5 
 DEFAULT_TIMEOUT = 15
 CACHE_EXPIRY_HOURS = 24
 

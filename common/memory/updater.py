@@ -20,7 +20,7 @@ class UserProfileSchema(BaseModel):
     no_change: bool = False  # True si aucune nouvelle info
 
 # Prompt pour la mini-IA
-PROFILE_UPDATE_PROMPT = """Tu dois mettre à jour un profil utilisateur pour une IA.
+PROFILE_UPDATE_PROMPT = """Tu dois mettre a jour un profil utilisateur pour une IA.
 
 PROFIL ACTUEL:
 {current_profile}
@@ -29,25 +29,31 @@ NOUVEAUX MESSAGES:
 {messages}
 
 OBJECTIF:
-Garder un profil utile à l'IA pour comprendre la personne (ton préféré, besoins, sujets récurrents, contraintes).
+Garder uniquement les informations UTILES pour personnaliser les interactions futures avec cette personne.
 
-RÈGLES DE MISE À JOUR:
-- Conserve toutes les informations encore vraies du profil actuel, surtout les préférences de communication.
-- Ajoute uniquement des faits explicitement présents dans les nouveaux messages.
-- Remplace une information seulement si elle est explicitement contredite.
-- Organise le profil en paragraphes courts (≈6 à 8 phrases au total).
+QUE RETENIR (exemples):
+- Identite: prenom, age, metier, localisation
+- Preferences de communication: ton souhaite, niveau de detail, sujets a eviter
+- Contexte personnel: projets en cours, competences, centres d'interet recurrents
+- Contraintes: limites, besoins specifiques, accessibilite
 
-PROCESSUS:
-1. Reprendre les éléments pertinents du profil actuel.
-2. Ajouter les nouvelles informations utiles.
-3. Si rien ne change, mets `no_change` à TRUE et recopie exactement le profil actuel dans `content`.
+QUE NE PAS RETENIR (exemples):
+- Opinions temporaires ou contextuelles ("j'aime pas ce film")
+- Actions ponctuelles ("j'ai mange une pizza")
+- Questions posees (sauf si elles revelent un besoin recurrent)
+- Informations sur d'autres personnes mentionnees
+- Faits generaux non lies a l'utilisateur
 
-CONTRAINTES STRICTES:
-- N'écris que des faits explicitement mentionnés.
-- Aucune inférence ou supposition.
-- Style télégraphique, clair pour une IA, phrases courtes mais complètes.
-- Mentionne les préférences de ton ou de format si elles existent.
-- Longueur indicative: 400 à 700 caractères."""
+REGLES DE MISE A JOUR:
+- Conserve toutes les informations encore pertinentes du profil actuel, SURTOUT les preferences de communication
+- Ajoute uniquement des faits explicitement mentionnes ET utiles a long terme
+- Remplace une information seulement si explicitement contredite
+- Si aucune nouvelle info pertinente: mets "no_change" a TRUE et recopie le profil actuel dans "content"
+
+CONTRAINTES:
+- Aucune inference, supposition ou extrapolation
+- Style telegraphique, phrases courtes et factuelles
+- Longueur: 400-700 caracteres (environ 6-8 phrases)"""
 
 class ProfileUpdater:
     """Mini IA pour mettre à jour les profils utilisateur."""

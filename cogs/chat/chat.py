@@ -286,8 +286,11 @@ class Chat(commands.Cog):
         update_profile_tool = Tool(
             name='update_user_profile',
             description=(
-                "Enregistre automatiquement les infos importantes de l'AUTEUR du message (nom, âge, métier, préférences, compétences). "
-                "Utilise dès qu'il partage des infos personnelles durables. JAMAIS pour d'autres personnes."
+                "Enregistre les infos UTILES de l'auteur pour personnaliser les futures interactions. "
+                "A RETENIR: identite (prenom, age, metier, localisation), preferences de communication (ton, niveau de detail, sujets a eviter), "
+                "contexte personnel durable (projets, competences, centres d'interet recurrents), contraintes specifiques. "
+                "A NE PAS RETENIR: opinions temporaires, actions ponctuelles, questions posees, infos sur d'autres personnes, faits generaux. "
+                "Utilise uniquement si l'auteur partage une info durable et nouvelle. JAMAIS pour d'autres personnes."
             ),
             properties={},
             function=self._tool_update_user_profile

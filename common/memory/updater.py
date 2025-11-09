@@ -46,7 +46,7 @@ RÈGLES:
 - Style naturel et fluide (pas de liste à puces)
 - Concis mais complet
 
-Exemple: "Jean, 25 ans, développeur web à Paris. Utilise Python et React. Travaille sur un bot Discord. Préfère le café au thé.""""
+Exemple: "Jean, 25 ans, développeur web à Paris. Utilise Python et React. Travaille sur un bot Discord. Préfère le café au thé." """
 
 class ProfileUpdater:
     """Mini IA pour mettre à jour les profils utilisateur."""

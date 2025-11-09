@@ -18,7 +18,7 @@ GPT_TOKENIZER = tiktoken.get_encoding('cl100k_base')
 
 # Configuration par défaut du contexte
 DEFAULT_CONTEXT_WINDOW = 512 * 64  # 32k tokens
-DEFAULT_CONTEXT_AGE = timedelta(hours=1)
+DEFAULT_CONTEXT_AGE = timedelta(minutes=90)
 
 # COMPOSANTS DE CONTENU -------------------------------------------
 

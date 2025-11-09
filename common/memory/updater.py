@@ -32,44 +32,47 @@ OBJECTIF:
 Garder uniquement les informations UTILES pour personnaliser les interactions futures avec cette personne.
 
 QUE RETENIR (exemples):
-- Identite: prenom, age, metier, localisation
-- Preferences de communication: ton souhaite, niveau de detail, sujets a eviter
-- Contexte personnel: projets en cours, competences, centres d'interet recurrents
-- Contraintes: limites, besoins specifiques, accessibilite
+- Identite STABLE: prenom, metier, localisation generale (ville/pays)
+- Préférences de communication: ton souhaite, niveau de detail, sujets à éviter
+- Competences professionnelles ou techniques importantes
+- Contraintes durables: limites, besoins spécifiques, accessibilité
 
 QUE NE PAS RETENIR (exemples):
-- Opinions temporaires ou contextuelles ("j'aime pas ce film")
-- Actions ponctuelles ("j'ai mange une pizza")
-- Questions posees (sauf si elles revelent un besoin recurrent)
-- Informations sur d'autres personnes mentionnees
-- Faits generaux non lies a l'utilisateur
+- Age exact (change chaque annee, inutile)
+- Goûts personnels temporaires ("aime les blondes", "intéresse par X produit")
+- Projets ponctuels ou achats envisages
+- Descriptions physiques ou preferences esthetiques
+- Actions du moment ("cherche actuellement", "veut acheter")
+- Informations sur d'autres personnes
+- Détails anecdotiques sans impact sur les futures interactions
 
 INSTRUCTIONS:
 1. Lis le profil actuel et les nouveaux messages
-2. Determine s'il y a de nouvelles infos pertinentes a ajouter
-3. Si OUI: ecris le profil mis a jour dans le champ "content" et mets "no_change" a false
-4. Si NON: recopie exactement le profil actuel dans "content" et mets "no_change" a true
+2. Détermine s'il y a de nouvelles infos pertinentes à ajouter
+3. Si OUI: écris le profil mis à jour dans le champ "content" et mets "no_change" à false
+4. Si NON: recopie exactement le profil actuel dans "content" et mets "no_change" à true
 
 REGLES STRICTES - CE QUI EST INTERDIT:
-- AUCUNE supposition, inference ou deduction
-- AUCUNE interpretation de ce que l'utilisateur "pourrait" vouloir dire
-- AUCUNE generalisation a partir d'un exemple unique
-- N'ecris QUE ce qui est EXPLICITEMENT dit par l'utilisateur lui-meme
+- AUCUNE supposition, inférence ou déduction
+- AUCUNE interprétation de ce que l'utilisateur "pourrait" vouloir dire
+- AUCUNE généralisation à partir d'un exemple unique
+- N'écris QUE ce qui est EXPLICITEMENT dit par l'utilisateur lui-même
 - Si une info n'est pas claire ou certaine, NE L'ECRIS PAS
 
 EXEMPLES DE CE QU'IL NE FAUT PAS FAIRE:
-- Message: "je code en Python" -> N'ecris PAS "developpeur" (pas dit explicitement)
-- Message: "j'aime ce jeu" -> N'ecris PAS "gamer" (trop general)
-- Message: "je suis fatigue" -> N'ecris PAS "problemes de sommeil" (supposition)
+- Message: "je code en Python" -> N'écris PAS "développeur" (pas dit explicitement)
+- Message: "j'aime ce jeu" -> N'écris PAS "gamer" (trop général)
+- Message: "je suis fatigue" -> N'écris PAS "problèmes de sommeil" (supposition)
+- Message: "j'aime les blondes" -> N'écris PAS (préférence personnelle sans impact sur l'IA)
 
 IMPORTANT:
 - Le champ "content" doit contenir UNIQUEMENT le texte du profil
-- N'ecris JAMAIS "no_change" ou d'autres metadonnees dans le texte du profil
-- "no_change" est un champ separe du schema JSON
+- N'écris JAMAIS "no_change" ou d'autres métadonnées dans le texte du profil
+- "no_change" est un champ séparé du schéma JSON
 
 FORMAT DU PROFIL:
-- Style telegraphique, phrases courtes et factuelles
-- Longueur: 400-700 caracteres (environ 6-8 phrases)
+- Style télégraphique, phrases courtes et factuelles
+- Longueur: 400-700 caractères (environ 6-8 phrases)
 - Sois EXTREMEMENT conservateur: en cas de doute, n'ajoute rien"""
 
 class ProfileUpdater:

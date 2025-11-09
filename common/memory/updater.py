@@ -51,6 +51,7 @@ INSTRUCTIONS:
 2. Détermine s'il y a de nouvelles infos pertinentes à ajouter
 3. Si OUI: écris le profil mis à jour dans le champ "content" et mets "no_change" à false
 4. Si NON: recopie exactement le profil actuel dans "content" et mets "no_change" à true
+5. Profite éventuellement pour essentialiser les informations importantes et garder que le plus pertinent
 
 REGLES STRICTES - CE QUI EST INTERDIT:
 - AUCUNE supposition, inférence ou déduction

@@ -345,7 +345,7 @@ class Web(commands.Cog):
             'note': 'Si les extraits sont insuffisants, utilise read_web_page sur une URL specifique pour plus de details.'
         }
         
-        header = f'Recherche ⸱ "{query}" ({len(results)} resultats)'
+        header = f'Recherche ⸱ "{query}"'
         
         return ToolResponseRecord(
             tool_call_id=tool_call.id,

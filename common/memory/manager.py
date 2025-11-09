@@ -53,6 +53,9 @@ class MemoryManager:
         self._update_queue: asyncio.Queue = asyncio.Queue()
         self._update_task: Optional[asyncio.Task] = None
         
+        # Verrous pour éviter les race conditions lors des MAJ
+        self._update_locks: Dict[int, asyncio.Lock] = {}
+        
         logger.info("MemoryManager initialisé")
     
     def start_background_updater(self):
@@ -67,26 +70,31 @@ class MemoryManager:
             try:
                 user_id, messages = await self._update_queue.get()
                 
-                profile = self.get_profile(user_id)
-                current_content = profile.content if profile else None
+                # Obtenir ou créer le verrou pour cet utilisateur
+                if user_id not in self._update_locks:
+                    self._update_locks[user_id] = asyncio.Lock()
                 
-                new_content = await self.updater.update_profile(current_content, messages)
-                
-                if new_content:
-                    if profile:
-                        profile.content = new_content
-                        profile.reset_counter()
-                    else:
-                        profile = UserProfile(
-                            user_id=user_id,
-                            content=new_content,
-                            created_at=datetime.now(timezone.utc),
-                            updated_at=datetime.now(timezone.utc),
-                            messages_since_update=0
-                        )
+                async with self._update_locks[user_id]:
+                    profile = self.get_profile(user_id)
+                    current_content = profile.content if profile else None
                     
-                    self._save_profile(profile)
-                    logger.info(f"Profil mis à jour pour user {user_id}")
+                    new_content = await self.updater.update_profile(current_content, messages)
+                    
+                    if new_content:
+                        if profile:
+                            profile.content = new_content
+                            profile.reset_counter()
+                        else:
+                            profile = UserProfile(
+                                user_id=user_id,
+                                content=new_content,
+                                created_at=datetime.now(timezone.utc),
+                                updated_at=datetime.now(timezone.utc),
+                                messages_since_update=0
+                            )
+                        
+                        self._save_profile(profile)
+                        logger.info(f"Profil mis à jour pour user {user_id}")
                 
                 self._update_queue.task_done()
                 
@@ -176,30 +184,35 @@ class MemoryManager:
             return False
         
         try:
-            profile = self.get_profile(user_id)
-            current_content = profile.content if profile else None
+            # Obtenir ou créer le verrou pour cet utilisateur
+            if user_id not in self._update_locks:
+                self._update_locks[user_id] = asyncio.Lock()
             
-            new_content = await self.updater.update_profile(current_content, recent_messages, force=True)
-            
-            if new_content:
-                if profile:
-                    profile.content = new_content
-                    profile.reset_counter()
-                else:
-                    profile = UserProfile(
-                        user_id=user_id,
-                        content=new_content,
-                        created_at=datetime.now(timezone.utc),
-                        updated_at=datetime.now(timezone.utc),
-                        messages_since_update=0
-                    )
+            async with self._update_locks[user_id]:
+                profile = self.get_profile(user_id)
+                current_content = profile.content if profile else None
                 
-                self._save_profile(profile)
-                logger.info(f"Profil MAJ immédiate pour user {user_id} (IA)")
-                return True
-            else:
-                logger.debug(f"Aucune nouvelle info pour user {user_id}")
-                return False
+                new_content = await self.updater.update_profile(current_content, recent_messages, force=True)
+                
+                if new_content:
+                    if profile:
+                        profile.content = new_content
+                        profile.reset_counter()
+                    else:
+                        profile = UserProfile(
+                            user_id=user_id,
+                            content=new_content,
+                            created_at=datetime.now(timezone.utc),
+                            updated_at=datetime.now(timezone.utc),
+                            messages_since_update=0
+                        )
+                    
+                    self._save_profile(profile)
+                    logger.info(f"Profil MAJ immédiate pour user {user_id} (IA)")
+                    return True
+                else:
+                    logger.debug(f"Aucune nouvelle info pour user {user_id}")
+                    return False
                 
         except Exception as e:
             logger.error(f"Erreur force update: {e}")

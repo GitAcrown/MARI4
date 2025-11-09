@@ -140,11 +140,57 @@ class InfoView(ui.LayoutView):
         
         self.add_item(container)
 
+class ProfileEditModal(ui.Modal, title="Modifier votre profil"):
+    """Modal pour éditer le profil utilisateur."""
+    
+    def __init__(self, memory_manager, user_id: int, current_content: str):
+        super().__init__()
+        self.memory_manager = memory_manager
+        self.user_id = user_id
+        
+        self.content_input = ui.TextInput(
+            label="Votre profil",
+            style=discord.TextStyle.paragraph,
+            default=current_content,
+            max_length=1000,
+            required=True
+        )
+        self.add_item(self.content_input)
+    
+    async def on_submit(self, interaction: Interaction):
+        """Sauvegarde les modifications."""
+        new_content = self.content_input.value.strip()
+        
+        if not new_content:
+            await interaction.response.send_message(
+                "Le profil ne peut pas être vide.",
+                ephemeral=True
+            )
+            return
+        
+        profile = self.memory_manager.get_profile(self.user_id)
+        if profile:
+            profile.content = new_content
+            profile.updated_at = datetime.now(timezone.utc)
+            self.memory_manager._save_profile(profile)
+            
+            await interaction.response.send_message(
+                "Profil mis à jour avec succès.",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                "Erreur lors de la mise à jour.",
+                ephemeral=True
+            )
+
 class MemoryProfileView(ui.LayoutView):
     """Vue pour afficher le profil mémoire d'un utilisateur."""
-    def __init__(self, user: discord.User, profile):
+    def __init__(self, user: discord.User, profile, memory_manager):
         super().__init__(timeout=300)
         self.user = user
+        self.profile = profile
+        self.memory_manager = memory_manager
         
         container = ui.Container()
         
@@ -152,36 +198,46 @@ class MemoryProfileView(ui.LayoutView):
         container.add_item(header)
         container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.large))
         
-        # Parser le contenu structuré
-        content_lines = profile.content.strip().split('\n')
-        sections = {}
-        current_section = None
-        
-        for line in content_lines:
-            line = line.strip()
-            if line.startswith('**') and line.endswith(':**'):
-                # Nouveau champ
-                current_section = line.replace('**', '').replace(':', '').strip()
-                sections[current_section] = []
-            elif line and current_section:
-                sections[current_section].append(line)
-        
-        # Afficher chaque section
-        for section_name, section_lines in sections.items():
-            if section_lines:
-                section_text = ' '.join(section_lines)
-                if section_text:
-                    field_display = ui.TextDisplay(f"**{section_name}**\n{section_text}")
-                    container.add_item(field_display)
+        # Afficher le contenu du profil
+        content_display = ui.TextDisplay(profile.content.strip())
+        container.add_item(content_display)
         
         container.add_item(ui.Separator())
         # Convertir UTC vers Paris
         last_update_paris = profile.updated_at.astimezone(PARIS_TZ)
         last_update = last_update_paris.strftime("%d/%m/%y %H:%M")
-        footer = ui.TextDisplay(f"-# Mis à jour le {last_update} · **/memory reset** pour effacer")
+        footer = ui.TextDisplay(f"-# Mis à jour le {last_update}")
         container.add_item(footer)
         
         self.add_item(container)
+        
+        # Boutons d'action
+        self.edit_button = ui.Button(label="Modifier", style=discord.ButtonStyle.primary)
+        self.edit_button.callback = self.on_edit
+        self.add_item(self.edit_button)
+        
+        self.reset_button = ui.Button(label="Effacer", style=discord.ButtonStyle.danger)
+        self.reset_button.callback = self.on_reset
+        self.add_item(self.reset_button)
+    
+    async def on_edit(self, interaction: Interaction):
+        """Ouvre le modal d'édition."""
+        modal = ProfileEditModal(self.memory_manager, self.user.id, self.profile.content)
+        await interaction.response.send_modal(modal)
+    
+    async def on_reset(self, interaction: Interaction):
+        """Efface le profil."""
+        success = self.memory_manager.delete_profile(self.user.id)
+        if success:
+            await interaction.response.send_message(
+                "Toutes vos informations ont été effacées.",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                "Aucune information à effacer.",
+                ephemeral=True
+            )
 
 # COG -------------------------------------------------------------
 
@@ -690,25 +746,9 @@ class Chat(commands.Cog):
             )
         
         # Créer la vue
-        view = MemoryProfileView(user=interaction.user, profile=profile)
+        view = MemoryProfileView(user=interaction.user, profile=profile, memory_manager=self.memory)
         
         await interaction.response.send_message(view=view, ephemeral=True)
-    
-    @memory_group.command(name='reset')
-    async def memory_reset(self, interaction: Interaction):
-        """Efface toutes les informations que MARIA a enregistrées sur vous."""
-        success = self.memory.delete_profile(interaction.user.id)
-        
-        if success:
-            await interaction.response.send_message(
-                "Toutes vos informations ont été effacées.",
-                ephemeral=True
-            )
-        else:
-            await interaction.response.send_message(
-                "Aucune information à effacer.",
-                ephemeral=True
-            )
  
 async def setup(bot):
     await bot.add_cog(Chat(bot))

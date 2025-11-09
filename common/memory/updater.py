@@ -15,15 +15,11 @@ MAX_TOKENS = 500  # Limite pour le profil
 
 # Schéma Pydantic pour le profil
 class UserProfileSchema(BaseModel):
-    """Schéma structuré pour les profils utilisateurs."""
-    identite: str = ""  # Nom/pseudo, âge, localisation
-    activite: str = ""  # Études/travail, projets en cours
-    tech: str = ""  # Langages, outils, frameworks, compétences techniques
-    preferences: str = ""  # Goûts, aversions, habitudes
-    contexte: str = ""  # Autres informations pertinentes
+    """Schéma pour les profils utilisateurs."""
+    content: str = ""  # Profil complet en texte libre
     no_change: bool = False  # True si aucune nouvelle info
 
-# Prompt strict pour éviter les hallucinations
+# Prompt pour la mini-IA
 PROFILE_UPDATE_PROMPT = """Tu dois mettre à jour un profil utilisateur pour une IA.
 
 PROFIL ACTUEL:
@@ -33,24 +29,24 @@ NOUVEAUX MESSAGES:
 {messages}
 
 INSTRUCTIONS:
-1. Analyse les nouveaux messages pour trouver des infos personnelles (nom, âge, métier, compétences, préférences, etc.)
-2. Si tu trouves des nouvelles infos OU des modifications aux infos existantes:
-   - Mets à jour les champs concernés en FUSIONNANT avec le profil actuel
-   - Met "no_change" à FALSE
-   - Garde les infos existantes qui ne changent pas
-3. Si AUCUNE nouvelle info pertinente dans les messages:
-   - Met "no_change" à TRUE
-   - Remplis quand même tous les champs avec le contenu actuel (copie-le)
+Écris un profil concis (5-8 phrases max) qui résume l'utilisateur.
+Inclus : nom/pseudo, âge, localisation, métier/études, compétences techniques, préférences, projets, autres infos pertinentes.
+
+Si tu trouves des nouvelles infos dans les messages:
+- Fusionne-les avec le profil actuel
+- Met "no_change" à FALSE
+
+Si AUCUNE nouvelle info pertinente:
+- Met "no_change" à TRUE
+- Copie le profil actuel tel quel dans "content"
 
 RÈGLES:
 - N'écris QUE des faits explicitement mentionnés
 - JAMAIS d'inférence ou de supposition
-- Sois concis mais complet
-- Si un champ n'a jamais eu d'info, laisse-le vide ""
+- Style naturel et fluide (pas de liste à puces)
+- Concis mais complet
 
-Exemple: Si l'utilisateur dit "j'ai 25 ans" et le profil actuel dit "Nom: Jean", tu dois mettre:
-identite: "Nom: Jean, 25 ans"
-no_change: false"""
+Exemple: "Jean, 25 ans, développeur web à Paris. Utilise Python et React. Travaille sur un bot Discord. Préfère le café au thé.""""
 
 class ProfileUpdater:
     """Mini IA pour mettre à jour les profils utilisateur."""
@@ -137,27 +133,15 @@ class ProfileUpdater:
             return None
     
     def _format_profile(self, schema: UserProfileSchema) -> str:
-        """Formate le schéma en texte structuré.
+        """Retourne le contenu du profil.
         
         Args:
             schema: Schéma Pydantic parsé
             
         Returns:
-            Texte formaté lisible
+            Texte du profil
         """
-        parts = []
-        if schema.identite:
-            parts.append(f"**Identité:**\n{schema.identite}")
-        if schema.activite:
-            parts.append(f"**Activité:**\n{schema.activite}")
-        if schema.tech:
-            parts.append(f"**Tech:**\n{schema.tech}")
-        if schema.preferences:
-            parts.append(f"**Préférences:**\n{schema.preferences}")
-        if schema.contexte:
-            parts.append(f"**Contexte:**\n{schema.contexte}")
-        
-        return "\n\n".join(parts)
+        return schema.content.strip()
     
     def _format_messages(self, messages: list[discord.Message]) -> str:
         """Formate les messages pour le prompt."""

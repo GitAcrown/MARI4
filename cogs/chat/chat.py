@@ -99,7 +99,7 @@ class InfoView(ui.LayoutView):
             last_response = "jamais"
         
         session_text = f"**Messages en contexte** · `{context_stats['total_messages']}`\n"
-        session_text += f"**Tokens utilisés** · `{context_stats['total_tokens']} / 16k` ({context_stats['window_usage_pct']:.1f}%)\n"
+        session_text += f"**Tokens utilisés** · `{context_stats['total_tokens']} / 32k` ({context_stats['window_usage_pct']:.1f}%)\n"
         session_text += f"**Dernière réponse** · {last_response}"
         
         session_info = ui.TextDisplay(session_text)

@@ -184,6 +184,36 @@ class ProfileEditModal(ui.Modal, title="Modifier votre profil"):
                 ephemeral=True
             )
 
+class ProfileEditButton(ui.Button['MemoryProfileView']):
+    """Bouton pour éditer le profil."""
+    def __init__(self):
+        super().__init__(label="Modifier", style=discord.ButtonStyle.primary)
+    
+    async def callback(self, interaction: Interaction):
+        """Ouvre le modal d'édition."""
+        modal = ProfileEditModal(self.view.memory_manager, self.view.user.id, self.view.profile.content)
+        await interaction.response.send_modal(modal)
+
+class ProfileResetButton(ui.Button['MemoryProfileView']):
+    """Bouton pour effacer le profil."""
+    def __init__(self):
+        super().__init__(label="Effacer", style=discord.ButtonStyle.danger)
+    
+    async def callback(self, interaction: Interaction):
+        """Efface le profil."""
+        success = self.view.memory_manager.delete_profile(self.view.user.id)
+        if success:
+            await interaction.response.send_message(
+                "Toutes vos informations ont été effacées.",
+                ephemeral=True
+            )
+            self.view.stop()
+        else:
+            await interaction.response.send_message(
+                "Aucune information à effacer.",
+                ephemeral=True
+            )
+
 class MemoryProfileView(ui.LayoutView):
     """Vue pour afficher le profil mémoire d'un utilisateur."""
     def __init__(self, user: discord.User, profile, memory_manager):
@@ -212,32 +242,8 @@ class MemoryProfileView(ui.LayoutView):
         self.add_item(container)
         
         # Boutons d'action
-        self.edit_button = ui.Button(label="Modifier", style=discord.ButtonStyle.primary)
-        self.edit_button.callback = self.on_edit
-        self.add_item(self.edit_button)
-        
-        self.reset_button = ui.Button(label="Effacer", style=discord.ButtonStyle.danger)
-        self.reset_button.callback = self.on_reset
-        self.add_item(self.reset_button)
-    
-    async def on_edit(self, interaction: Interaction):
-        """Ouvre le modal d'édition."""
-        modal = ProfileEditModal(self.memory_manager, self.user.id, self.profile.content)
-        await interaction.response.send_modal(modal)
-    
-    async def on_reset(self, interaction: Interaction):
-        """Efface le profil."""
-        success = self.memory_manager.delete_profile(self.user.id)
-        if success:
-            await interaction.response.send_message(
-                "Toutes vos informations ont été effacées.",
-                ephemeral=True
-            )
-        else:
-            await interaction.response.send_message(
-                "Aucune information à effacer.",
-                ephemeral=True
-            )
+        self.add_item(ProfileEditButton())
+        self.add_item(ProfileResetButton())
 
 # COG -------------------------------------------------------------
 

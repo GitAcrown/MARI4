@@ -252,8 +252,8 @@ class Chat(commands.Cog):
             developer_prompt_template=get_developer_prompt,
             completion_model='gpt-5-mini',
             transcription_model='gpt-4o-transcribe',
-            max_completion_tokens=1000,
-            context_window=16384,
+            max_completion_tokens=1024,
+            context_window=32768,  # 32k tokens
             context_age_hours=6
         )
         

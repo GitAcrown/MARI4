@@ -11,7 +11,7 @@ logger = logging.getLogger('MARI4.memory.updater')
 
 # Modèle économique pour les mises à jour
 UPDATE_MODEL = 'gpt-4.1-nano'
-MAX_TOKENS = 500  # Limite pour le profil
+MAX_TOKENS = 700  # Limite pour le profil
 
 # Schéma Pydantic pour le profil
 class UserProfileSchema(BaseModel):
@@ -28,23 +28,26 @@ PROFIL ACTUEL:
 NOUVEAUX MESSAGES:
 {messages}
 
-INSTRUCTIONS:
-Écris un profil très concis (~5 phrases max) qui résume UNIQUEMENT les faits mentionnés.
+OBJECTIF:
+Garder un profil utile à l'IA pour comprendre la personne (ton préféré, besoins, sujets récurrents, contraintes).
 
-Si tu trouves des nouvelles infos dans les messages:
-- Fusionne-les avec le profil actuel
-- Met "no_change" à FALSE
+RÈGLES DE MISE À JOUR:
+- Conserve toutes les informations encore vraies du profil actuel, surtout les préférences de communication.
+- Ajoute uniquement des faits explicitement présents dans les nouveaux messages.
+- Remplace une information seulement si elle est explicitement contredite.
+- Organise le profil en paragraphes courts (≈6 à 8 phrases au total).
 
-Si AUCUNE nouvelle info pertinente:
-- Met "no_change" à TRUE
-- Copie le profil actuel tel quel dans "content"
+PROCESSUS:
+1. Reprendre les éléments pertinents du profil actuel.
+2. Ajouter les nouvelles informations utiles.
+3. Si rien ne change, mets `no_change` à TRUE et recopie exactement le profil actuel dans `content`.
 
-RÈGLES STRICTES:
-- N'écris QUE des faits EXPLICITEMENT mentionnés par l'utilisateur
-- JAMAIS d'inférence, de supposition ou d'extrapolation
-- Si une info n'est pas claire ou certaine, ne l'écris pas
-- Style télégraphique et factuel
-- Maximum 3-5 phrases courtes"""
+CONTRAINTES STRICTES:
+- N'écris que des faits explicitement mentionnés.
+- Aucune inférence ou supposition.
+- Style télégraphique, clair pour une IA, phrases courtes mais complètes.
+- Mentionne les préférences de ton ou de format si elles existent.
+- Longueur indicative: 400 à 700 caractères."""
 
 class ProfileUpdater:
     """Mini IA pour mettre à jour les profils utilisateur."""

@@ -1,6 +1,6 @@
 # MARIA v4 (MARI4)
 
-Bot Discord conversationnel propulsé par GPT-4. Conversation naturelle, recherche web, transcription audio, mémoire long terme.
+Bot Discord conversationnel propulsé par GPT-5. Conversation naturelle, recherche web, transcription audio, mémoire long terme.
 
 ## Fonctionnalités
 
@@ -37,4 +37,4 @@ python bot.py
 
 ## Technologies
 
-Discord.py • OpenAI GPT-4 • DDGS • SQLite
+Discord.py • OpenAI GPT-5 • DDGS • SQLite

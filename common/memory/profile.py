@@ -39,14 +39,14 @@ class UserProfile:
         )
     
     def should_update(self) -> bool:
-        """Détermine si la carte doit être mise à jour.
+        """Détermine si la carte doit être mise à jour automatiquement.
         
-        Règles:
-        - Au moins 15 messages depuis dernière MAJ
-        - ET au moins 6h écoulées
+        Règles (moins fréquentes car l'IA peut déclencher manuellement):
+        - Au moins 30 messages depuis dernière MAJ
+        - ET au moins 12h écoulées
         """
         hours_elapsed = (datetime.now(timezone.utc) - self.updated_at).total_seconds() / 3600
-        return self.messages_since_update >= 15 and hours_elapsed >= 6
+        return self.messages_since_update >= 30 and hours_elapsed >= 12
     
     def increment_messages(self) -> None:
         """Incrémente le compteur de messages."""

@@ -155,7 +155,7 @@ class MemoryManager:
             self._save_profile(profile)
     
     async def check_and_schedule_update(self, user_id: int, recent_messages: list[discord.Message]):
-        """Vérifie si une mise à jour est nécessaire et la planifie.
+        """Vérifie si une mise à jour automatique est nécessaire et la planifie.
         
         Args:
             user_id: ID de l'utilisateur Discord
@@ -163,11 +163,30 @@ class MemoryManager:
         """
         profile = self.get_profile(user_id)
         
-        # Première fois ou besoin de mise à jour
+        # Première fois ou besoin de mise à jour automatique
         if profile is None or profile.should_update():
             # Ajouter à la queue (non-bloquant)
             await self._update_queue.put((user_id, recent_messages))
-            logger.debug(f"Mise à jour planifiée pour user {user_id}")
+            logger.debug(f"Mise à jour automatique planifiée pour user {user_id}")
+    
+    async def force_update(self, user_id: int, recent_messages: list[discord.Message]) -> bool:
+        """Force une mise à jour immédiate du profil (appelé par l'IA).
+        
+        Args:
+            user_id: ID de l'utilisateur Discord
+            recent_messages: Messages récents de l'utilisateur
+            
+        Returns:
+            True si la mise à jour a été planifiée, False sinon
+        """
+        if not recent_messages:
+            logger.warning(f"Force update demandée pour user {user_id} mais pas de messages")
+            return False
+        
+        # Ajouter à la queue avec priorité (même si seuils pas atteints)
+        await self._update_queue.put((user_id, recent_messages))
+        logger.info(f"Mise à jour manuelle planifiée pour user {user_id} (déclenchée par l'IA)")
+        return True
     
     def delete_profile(self, user_id: int) -> bool:
         """Supprime le profil d'un utilisateur.

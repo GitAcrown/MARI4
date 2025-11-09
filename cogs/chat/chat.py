@@ -240,9 +240,65 @@ class Chat(commands.Cog):
                 tools.extend(cog.GLOBAL_TOOLS)
                 logger.info(f"Outils chargés depuis {cog.qualified_name}: {len(cog.GLOBAL_TOOLS)}")
         
+        # Ajouter l'outil de mise à jour de profil
+        from common.llm import Tool
+        update_profile_tool = Tool(
+            name='update_user_profile',
+            description=(
+                "Met à jour la carte d'identité de l'utilisateur avec qui tu discutes. "
+                "Utilise cet outil quand l'utilisateur partage des informations importantes sur lui "
+                "(nom, âge, préférences, activités, compétences, contexte personnel). "
+                "Ne l'utilise PAS pour des infos triviales ou temporaires."
+            ),
+            parameters={
+                'type': 'object',
+                'properties': {
+                    'reason': {
+                        'type': 'string',
+                        'description': 'Courte explication de pourquoi tu mets à jour le profil (ex: "L\'utilisateur a mentionné son métier")'
+                    }
+                },
+                'required': ['reason']
+            },
+            function=self._tool_update_user_profile
+        )
+        tools.append(update_profile_tool)
+        
         if tools:
             self.gpt_api.add_tools(*tools)
             logger.info(f"Total outils enregistrés: {len(tools)}")
+    
+    # OUTILS ------------------------------------------------------
+    
+    async def _tool_update_user_profile(self, reason: str, trigger_message: discord.Message) -> str:
+        """Outil pour l'IA : met à jour le profil de l'utilisateur.
+        
+        Args:
+            reason: Raison de la mise à jour
+            trigger_message: Message qui a déclenché l'outil
+            
+        Returns:
+            Message de confirmation
+        """
+        user_id = trigger_message.author.id
+        
+        # Récupérer les messages récents de l'utilisateur
+        recent_messages = []
+        async for msg in trigger_message.channel.history(limit=20):
+            if msg.author.id == user_id and not msg.author.bot:
+                recent_messages.append(msg)
+        
+        if not recent_messages:
+            return "Erreur: Aucun message récent trouvé."
+        
+        # Forcer la mise à jour
+        success = await self.memory.force_update(user_id, recent_messages)
+        
+        if success:
+            logger.info(f"Profil de {trigger_message.author.name} mis à jour par l'IA. Raison: {reason}")
+            return f"Carte d'identité mise à jour. Raison: {reason}"
+        else:
+            return "Erreur lors de la mise à jour de la carte d'identité."
     
     # CONFIGURATION -----------------------------------------------
     

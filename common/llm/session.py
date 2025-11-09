@@ -289,6 +289,19 @@ class ChannelSession:
             # Récursion pour obtenir la réponse finale
             return await self._run_completion_unsafe(None)
         
+        # Si la réponse est vide (pas de contenu), retry une fois
+        if not message_obj.content or not message_obj.content.strip():
+            logger.warning("Réponse vide reçue, retry...")
+            # Supprimer le message vide du contexte
+            if self.context._messages and self.context._messages[-1] == assistant_record:
+                self.context._messages.pop()
+            # Ajouter un message système pour forcer une réponse
+            self.context.add_user_message(
+                components=[TextComponent("[SYSTEM] Reponds maintenant au dernier message.")],
+                name="system"
+            )
+            return await self._run_completion_unsafe(None)
+        
         self._stats['completions'] += 1
         self._stats['last_completion'] = datetime.now(timezone.utc)
         

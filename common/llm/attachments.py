@@ -283,8 +283,7 @@ async def _analyze_video_content(images: list[Path],
         # Appel API
         completion = await client.create_completion(
             messages=messages,
-            model=VIDEO_ANALYSIS_MODEL,
-            max_tokens=VIDEO_ANALYSIS_MAX_TOKENS
+            model=VIDEO_ANALYSIS_MODEL
         )
         
         return completion.choices[0].message.content or "ANALYSIS_FAILED"

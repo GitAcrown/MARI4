@@ -372,12 +372,12 @@ class Web(commands.Cog):
             response_data['page_url'] = successful_url
             response_data['status'] = 'success'
             domain = successful_url.split("//")[-1].split("/")[0]
-            header = f'Recherche : "{query}" → [{domain}](<{successful_url}>)'
+            header = f'Recherche ⸱ "{query}" → [{domain}](<{successful_url}>)'
         else:
             # Échec : aucune page lisible, on retourne juste les résultats de recherche
             response_data['status'] = 'search_only'
             response_data['note'] = 'Aucune page n\'a pu être lue automatiquement'
-            header = f'Recherche : "{query}" ({len(results)} résultats, pages non accessibles)'
+            header = f'Recherche ⸱ "{query}" ({len(results)} résultats, pages non accessibles)'
         
         return ToolResponseRecord(
             tool_call_id=tool_call.id,
@@ -426,7 +426,7 @@ class Web(commands.Cog):
                 'total_chunks_available': len(chunks)
             },
             created_at=datetime.now(timezone.utc),
-            metadata={'header': f'Lecture : [{domain}](<{url}>)'}
+            metadata={'header': f'Lecture ⸱ [{domain}](<{url}>)'}
         )
 
 async def setup(bot):

@@ -8,7 +8,7 @@ from typing import Literal, Union
 from collections import deque
 
 import discord
-from discord import Interaction, app_commands
+from discord import Interaction, app_commands, ui
 from discord.ext import commands
 
 from common import dataio
@@ -52,6 +52,127 @@ Date: {args['weekday']} {args['datetime']} (Paris) | Connaissances: sept 2024"""
 
 VALID_CHATBOT_CHANNELS = Union[discord.TextChannel, discord.VoiceChannel, discord.Thread]
 MAX_EDITION_AGE = timedelta(minutes=2)
+
+# UI VIEWS --------------------------------------------------------
+
+class InfoView(ui.LayoutView):
+    """Vue pour afficher les informations du bot."""
+    def __init__(self, bot: commands.Bot, channel: discord.TextChannel, context_stats: dict, stats: dict, global_stats: dict, config: str, tools: list):
+        super().__init__(timeout=300)
+        self.bot = bot
+        
+        container = ui.Container()
+        
+        # Header
+        header = ui.TextDisplay(f"## {bot.user.name}")
+        container.add_item(header)
+        subtitle = ui.TextDisplay("*Assistante IA pour Discord*")
+        container.add_item(subtitle)
+        container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.large))
+        
+        # Session info
+        session_title = ui.TextDisplay(f"### Session · {channel.name}")
+        container.add_item(session_title)
+        
+        session_text = f"**Messages en contexte** · `{context_stats['total_messages']}`\n"
+        session_text += f"**Tokens utilisés** · `{context_stats['total_tokens']} / 16k` ({context_stats['window_usage_pct']:.1f}%)\n"
+        if stats.get('last_completion'):
+            last = stats['last_completion']
+            delta = datetime.now(timezone.utc) - last
+            minutes = int(delta.total_seconds() / 60)
+            session_text += f"**Dernière réponse** · il y a {minutes}m"
+        else:
+            session_text += "**Dernière réponse** · jamais"
+        
+        session_info = ui.TextDisplay(session_text)
+        container.add_item(session_info)
+        container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.small))
+        
+        # Tools
+        if tools:
+            tools_title = ui.TextDisplay(f"### Outils disponibles · {len(tools)}")
+            container.add_item(tools_title)
+            
+            tools_list = '\n'.join([f"• {t.name}" for t in tools[:5]])
+            if len(tools) > 5:
+                tools_list += f"\n• ... et {len(tools) - 5} autres"
+            tools_display = ui.TextDisplay(tools_list)
+            container.add_item(tools_display)
+            container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.small))
+        
+        # Configuration
+        config_title = ui.TextDisplay("### Configuration serveur")
+        container.add_item(config_title)
+        
+        mode_text = {
+            'off': 'Désactivé',
+            'strict': 'Mentions directes uniquement',
+            'greedy': 'Mentions + nom du bot'
+        }.get(config, config.upper())
+        
+        config_info = ui.TextDisplay(f"**Mode** · `{mode_text}`")
+        container.add_item(config_info)
+        container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.small))
+        
+        # Stats globales
+        client_stats = global_stats['client_stats']
+        session_stats = global_stats['session_stats']
+        
+        global_title = ui.TextDisplay("### Statistiques globales")
+        container.add_item(global_title)
+        
+        global_text = f"**Complétions** · `{client_stats['completions']}`\n"
+        global_text += f"**Transcriptions** · `{client_stats['transcriptions']}`\n"
+        global_text += f"**Sessions actives** · `{session_stats['active_sessions']}`\n"
+        global_text += f"**Cache** · `{session_stats['cache_stats']['transcript_cache_size']} transcriptions, {session_stats['cache_stats']['video_cache_size']} vidéos`"
+        
+        global_info = ui.TextDisplay(global_text)
+        container.add_item(global_info)
+        
+        # Thumbnail
+        thumb = ui.Thumbnail(media=bot.user.display_avatar.url)
+        container.add_item(thumb)
+        
+        # Footer
+        container.add_item(ui.Separator())
+        footer = ui.TextDisplay("-# Utilisez /chatbot pour configurer MARIA")
+        container.add_item(footer)
+        
+        self.add_item(container)
+
+class MemoryProfileView(ui.LayoutView):
+    """Vue pour afficher le profil mémoire d'un utilisateur."""
+    def __init__(self, user: discord.User, profile):
+        super().__init__(timeout=300)
+        self.user = user
+        
+        container = ui.Container()
+        
+        # Header
+        header = ui.TextDisplay(f"## Votre carte d'identité")
+        container.add_item(header)
+        container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.large))
+        
+        # Profile content
+        profile_text = ui.TextDisplay(f">>> {profile.content}")
+        container.add_item(profile_text)
+        container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.small))
+        
+        # Metadata
+        messages_count = profile.messages_since_update
+        last_update = profile.updated_at.strftime("%d/%m/%Y à %H:%M")
+        
+        meta_text = f"**Dernière mise à jour** · {last_update}\n"
+        meta_text += f"**Messages depuis** · {messages_count}"
+        meta_display = ui.TextDisplay(meta_text)
+        container.add_item(meta_display)
+        
+        # Footer
+        container.add_item(ui.Separator())
+        footer = ui.TextDisplay("-# Utilisez /memory reset pour effacer ces informations")
+        container.add_item(footer)
+        
+        self.add_item(container)
 
 # COG -------------------------------------------------------------
 
@@ -159,16 +280,28 @@ class Chat(commands.Cog):
         
         # Mode strict: mentions uniquement
         if mode == 'strict':
-            return self.bot.user.mentioned_in(message)
+            mentioned = self.bot.user.mentioned_in(message)
+            logger.debug(f"Mode strict - Mentioned: {mentioned}")
+            return mentioned
         
         # Mode greedy: mentions + nom du bot
         if mode == 'greedy':
+            # Vérifier mention directe
             if self.bot.user.mentioned_in(message):
+                logger.debug(f"Mode greedy - Mention directe détectée")
                 return True
-            # Chercher le nom du bot dans le message
+            
+            # Chercher le nom complet du bot dans le message (insensible à la casse)
             import re
-            if re.search(rf'\b{re.escape(self.bot.user.name.lower())}\b', message.content.lower()):
+            bot_name_lower = self.bot.user.name.lower()
+            message_lower = message.content.lower()
+            
+            # Seulement le nom complet
+            if re.search(rf'\b{re.escape(bot_name_lower)}\b', message_lower):
+                logger.debug(f"Mode greedy - Nom du bot '{self.bot.user.name}' détecté")
                 return True
+            
+            logger.debug(f"Mode greedy - Aucune correspondance trouvée")
         
         return False
     
@@ -432,74 +565,19 @@ class Chat(commands.Cog):
         # Configuration
         config = self.get_guild_config(interaction.guild, 'chatbot_mode', str)
         
-        # Construire l'embed
-        embed = discord.Embed(
-            title=f"{self.bot.user.name}",
-            description="*Assistante IA pour Discord*",
-            color=interaction.guild.me.color
-        )
-        
-        # Session
-        session_info = f"Messages en contexte: `{context_stats['total_messages']}`\n"
-        session_info += f"Tokens utilisés: `{context_stats['total_tokens']} / 16k` ({context_stats['window_usage_pct']:.1f}%)\n"
-        if stats.get('last_completion'):
-            last = stats['last_completion']
-            delta = datetime.now(timezone.utc) - last
-            minutes = int(delta.total_seconds() / 60)
-            session_info += f"Dernière réponse: il y a {minutes}m"
-        else:
-            session_info += "Dernière réponse: jamais"
-        
-        embed.add_field(
-            name=f"📊 Session ({interaction.channel.name})",
-            value=session_info,
-            inline=False
-        )
-        
-        # Outils
+        # Créer la vue
         tools = self.gpt_api.get_all_tools()
-        if tools:
-            tools_list = '\n'.join([f"• {t.name}" for t in tools[:5]])
-            if len(tools) > 5:
-                tools_list += f"\n• ... et {len(tools) - 5} autres"
-            embed.add_field(
-                name=f"🛠️ Outils disponibles ({len(tools)})",
-                value=tools_list,
-                inline=False
-            )
-        
-        # Configuration
-        mode_text = {
-            'off': 'Désactivé',
-            'strict': 'Mentions directes uniquement',
-            'greedy': 'Mentions + nom du bot'
-        }.get(config, config.upper())
-        
-        embed.add_field(
-            name="⚙️ Configuration serveur",
-            value=f"Mode: `{mode_text}`",
-            inline=False
+        view = InfoView(
+            bot=self.bot,
+            channel=interaction.channel,
+            context_stats=context_stats,
+            stats=stats,
+            global_stats=global_stats,
+            config=config,
+            tools=tools
         )
         
-        # Stats globales
-        client_stats = global_stats['client_stats']
-        session_stats = global_stats['session_stats']
-        
-        global_info = f"Complétions: `{client_stats['completions']}`\n"
-        global_info += f"Transcriptions: `{client_stats['transcriptions']}`\n"
-        global_info += f"Sessions actives: `{session_stats['active_sessions']}`\n"
-        global_info += f"Cache: `{session_stats['cache_stats']['transcript_cache_size']} transcriptions, {session_stats['cache_stats']['video_cache_size']} vidéos`"
-        
-        embed.add_field(
-            name="📈 Statistiques globales",
-            value=global_info,
-            inline=False
-        )
-        
-        embed.set_thumbnail(url=self.bot.user.display_avatar.url)
-        embed.set_footer(text="Utilisez /chatbot pour configurer MARIA")
-        
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(view=view)
     
     # Groupe de commandes chatbot
     chatbot_group = app_commands.Group(
@@ -531,8 +609,7 @@ class Chat(commands.Cog):
         
         :param mode: Mode de réponse du chatbot
         """
-        self.set_guild_config(interaction.guild, 'chatbot_mode', mode)
-        
+        # Répondre immédiatement pour éviter le timeout
         mode_text = {
             'off': 'désactivé',
             'strict': 'mentions directes uniquement',
@@ -543,6 +620,9 @@ class Chat(commands.Cog):
             f"✅ Mode du chatbot modifié: **{mode_text}**",
             ephemeral=True
         )
+        
+        # Puis sauvegarder la config
+        self.set_guild_config(interaction.guild, 'chatbot_mode', mode)
     
     # Groupe de commandes memory
     memory_group = app_commands.Group(
@@ -561,22 +641,10 @@ class Chat(commands.Cog):
                 ephemeral=True
             )
         
-        # Calculer les stats
-        messages_count = profile.messages_since_update
-        last_update = profile.updated_at.strftime("%d/%m/%Y à %H:%M")
+        # Créer la vue
+        view = MemoryProfileView(user=interaction.user, profile=profile)
         
-        embed = discord.Embed(
-            title="Votre carte d'identité",
-            description=f">>> {profile.content}",
-            color=0x5865F2  # Blurple Discord
-        )
-        
-        # Ajouter les métadonnées en footer
-        embed.set_footer(
-            text=f"Dernière mise à jour: {last_update} • {messages_count} messages depuis • /memory reset pour effacer"
-        )
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.response.send_message(view=view, ephemeral=True)
     
     @memory_group.command(name='reset')
     async def memory_reset(self, interaction: Interaction):

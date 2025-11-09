@@ -4,6 +4,7 @@ Gestion des outils (tools/functions) disponibles pour l'IA."""
 import inspect
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Callable, Union, Awaitable, Any
 from dataclasses import dataclass
 
@@ -52,7 +53,6 @@ class Tool:
                 return result
             
             # Sinon on wrappe dans un ToolResponseRecord
-            from datetime import datetime, timezone
             return ToolResponseRecord(
                 tool_call_id=tool_call.id,
                 response_data=result if isinstance(result, dict) else {'result': result},
@@ -61,7 +61,6 @@ class Tool:
             
         except Exception as e:
             logger.error(f"Erreur lors de l'exécution de l'outil '{self.name}': {e}")
-            from datetime import datetime, timezone
             return ToolResponseRecord(
                 tool_call_id=tool_call.id,
                 response_data={'error': str(e)},

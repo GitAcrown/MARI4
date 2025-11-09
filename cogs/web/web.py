@@ -5,9 +5,10 @@ import logging
 import re
 import time
 import html
+import os
+from datetime import datetime, timezone
 from typing import List, Dict
 from urllib.parse import urlparse, urljoin
-import os
 
 import requests
 from bs4 import BeautifulSoup
@@ -316,8 +317,6 @@ class Web(commands.Cog):
     
     def _tool_search_and_read(self, tool_call: ToolCallRecord, context_data) -> ToolResponseRecord:
         """Outil combiné : recherche + lecture automatique de la meilleure page."""
-        from datetime import datetime, timezone
-        
         query = tool_call.arguments.get('query')
         lang = tool_call.arguments.get('lang', 'fr')
         
@@ -389,8 +388,6 @@ class Web(commands.Cog):
     
     def _tool_read_web_page(self, tool_call: ToolCallRecord, context_data) -> ToolResponseRecord:
         """Outil pour lire le contenu d'une page web."""
-        from datetime import datetime, timezone
-        
         url = tool_call.arguments.get('url')
         if not url:
             return ToolResponseRecord(

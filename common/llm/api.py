@@ -2,6 +2,7 @@
 Façade publique de l'API GPT pour MARI4."""
 
 import logging
+from datetime import timedelta
 from typing import Callable, Optional, Iterable
 from dataclasses import dataclass
 
@@ -97,7 +98,6 @@ class MariaGptApi:
         self.tool_registry = ToolRegistry()
         
         # Gestionnaire de sessions
-        from datetime import timedelta
         self.session_manager = ChannelSessionManager(
             client=self.client,
             tool_registry=self.tool_registry,

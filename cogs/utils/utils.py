@@ -2,6 +2,8 @@
 Outils utilitaires pour l'IA (calculs mathématiques, conversions, etc.)."""
 
 import logging
+from datetime import datetime, timezone
+
 from discord.ext import commands
 import numexpr as ne
 
@@ -34,8 +36,6 @@ class Utils(commands.Cog):
     
     def _tool_math_eval(self, tool_call: ToolCallRecord, context_data) -> ToolResponseRecord:
         """Outil pour évaluer des expressions mathématiques."""
-        from datetime import datetime, timezone
-        
         expression = tool_call.arguments.get('expression')
         if not expression:
             return ToolResponseRecord(

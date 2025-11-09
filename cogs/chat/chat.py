@@ -2,6 +2,7 @@
 Chatbot principal utilisant la nouvelle API GPT."""
 
 import logging
+import re
 import zoneinfo
 from datetime import datetime, timedelta, timezone
 from typing import Literal, Union
@@ -12,7 +13,7 @@ from discord import Interaction, app_commands, ui
 from discord.ext import commands
 
 from common import dataio
-from common.llm import MariaGptApi
+from common.llm import MariaGptApi, Tool
 from common.memory import MemoryManager
 
 logger = logging.getLogger(f'MARI4.{__name__.split(".")[-1]}')
@@ -235,22 +236,17 @@ class Chat(commands.Cog):
                 tools.extend(cog.GLOBAL_TOOLS)
                 logger.info(f"Outils chargés depuis {cog.qualified_name}: {len(cog.GLOBAL_TOOLS)}")
         
-        from common.llm import Tool
         update_profile_tool = Tool(
             name='update_user_profile',
             description=(
                 "Enregistre les infos importantes de l'utilisateur pour s'en souvenir (nom, âge, métier, préférences, compétences). "
                 "Utilise dès qu'il partage des infos personnelles durables, pas pour des trucs temporaires."
             ),
-            parameters={
-                'type': 'object',
-                'properties': {
-                    'reason': {
-                        'type': 'string',
-                        'description': 'Raison courte (ex: "nom et métier")'
-                    }
-                },
-                'required': ['reason']
+            properties={
+                'reason': {
+                    'type': 'string',
+                    'description': 'Raison courte (ex: "nom et métier")'
+                }
             },
             function=self._tool_update_user_profile
         )
@@ -324,7 +320,6 @@ class Chat(commands.Cog):
                 return True
             
             # Chercher le nom complet du bot dans le message (insensible à la casse)
-            import re
             bot_name_lower = self.bot.user.name.lower()
             message_lower = message.content.lower()
             
@@ -347,8 +342,6 @@ class Chat(commands.Cog):
         Sinon, message normal pour une conversation plus fluide.
         """
         try:
-            # Récupérer les messages récents (2 minutes)
-            from datetime import datetime, timedelta, timezone
             cutoff = datetime.now(timezone.utc) - timedelta(minutes=2)
             
             recent_messages = []

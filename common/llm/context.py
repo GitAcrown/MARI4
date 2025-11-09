@@ -1,6 +1,7 @@
 """### LLM > Context
 Gestion du contexte de conversation et des messages."""
 
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Literal, Optional, Any
@@ -113,7 +114,6 @@ class ToolCallRecord:
     
     def to_payload(self) -> dict:
         """Convertit en format OpenAI."""
-        import json
         return {
             'id': self.id,
             'type': 'function',
@@ -153,7 +153,6 @@ class ToolResponseRecord(MessageRecord):
     """Enregistrement d'une réponse d'outil."""
     
     def __init__(self, tool_call_id: str, response_data: dict, created_at: datetime, **kwargs):
-        import json
         components = [TextComponent(json.dumps(response_data))]
         super().__init__(
             role='tool',

@@ -2,6 +2,7 @@
 Gestion des sessions de conversation par salon avec contrôle de concurrence."""
 
 import asyncio
+import json
 import logging
 import re
 from datetime import datetime, timezone
@@ -261,7 +262,6 @@ class ChannelSession:
         tool_calls = []
         if message_obj.tool_calls:
             for tc in message_obj.tool_calls:
-                import json
                 tool_calls.append(ToolCallRecord(
                     id=tc.id,
                     function_name=tc.function.name,

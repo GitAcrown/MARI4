@@ -13,7 +13,7 @@ from discord import Interaction, app_commands, ui
 from discord.ext import commands
 
 from common import dataio
-from common.llm import MariaGptApi, Tool, ToolCallRecord
+from common.llm import MariaGptApi, Tool, ToolCallRecord, ToolResponseRecord
 from common.memory import MemoryManager
 
 logger = logging.getLogger(f'MARI4.{__name__.split(".")[-1]}')
@@ -147,12 +147,31 @@ class MemoryProfileView(ui.LayoutView):
         
         container = ui.Container()
         
-        header = ui.TextDisplay(f"## Votre carte d'identité")
+        header = ui.TextDisplay(f"## Votre profil")
         container.add_item(header)
         container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.large))
         
-        profile_text = ui.TextDisplay(f">>> {profile.content}")
-        container.add_item(profile_text)
+        # Parser le contenu structuré
+        content_lines = profile.content.strip().split('\n')
+        sections = {}
+        current_section = None
+        
+        for line in content_lines:
+            line = line.strip()
+            if line.startswith('**') and line.endswith(':**'):
+                # Nouveau champ
+                current_section = line.replace('**', '').replace(':', '').strip()
+                sections[current_section] = []
+            elif line and current_section:
+                sections[current_section].append(line)
+        
+        # Afficher chaque section
+        for section_name, section_lines in sections.items():
+            if section_lines:
+                section_text = ' '.join(section_lines)
+                if section_text:
+                    field_display = ui.TextDisplay(f"**{section_name}**\n{section_text}")
+                    container.add_item(field_display)
         
         container.add_item(ui.Separator())
         last_update = profile.updated_at.strftime("%d/%m/%y %H:%M")
@@ -258,13 +277,17 @@ class Chat(commands.Cog):
     
     # OUTILS ------------------------------------------------------
     
-    async def _tool_update_user_profile(self, tool_call: ToolCallRecord, context_data) -> dict:
+    async def _tool_update_user_profile(self, tool_call: ToolCallRecord, context_data) -> ToolResponseRecord:
         """Outil pour l'IA : met à jour le profil de l'utilisateur."""
         reason = tool_call.arguments.get('reason', 'Mise à jour manuelle')
         
         # Récupérer le trigger_message depuis la session
         if not context_data or not hasattr(context_data, 'trigger_message') or not context_data.trigger_message:
-            return {'result': "Erreur: Message déclencheur introuvable.", 'metadata': {}}
+            return ToolResponseRecord(
+                tool_call_id=tool_call.id,
+                response_data={'error': "Message déclencheur introuvable"},
+                created_at=datetime.now(timezone.utc)
+            )
         
         trigger_message = context_data.trigger_message
         user_id = trigger_message.author.id
@@ -275,18 +298,28 @@ class Chat(commands.Cog):
                 recent_messages.append(msg)
         
         if not recent_messages:
-            return {'result': "Erreur: Aucun message récent trouvé.", 'metadata': {}}
+            return ToolResponseRecord(
+                tool_call_id=tool_call.id,
+                response_data={'error': "Aucun message récent trouvé"},
+                created_at=datetime.now(timezone.utc)
+            )
         
         success = await self.memory.force_update(user_id, recent_messages)
         
         if success:
             logger.info(f"Profil de {trigger_message.author.name} mis à jour par l'IA. Raison: {reason}")
-            return {
-                'result': f"Carte d'identité mise à jour avec succès.",
-                'metadata': {'header': f"Mise à jour de la carte d'identité"}
-            }
+            return ToolResponseRecord(
+                tool_call_id=tool_call.id,
+                response_data={'result': "Profil mis à jour avec succès."},
+                created_at=datetime.now(timezone.utc),
+                metadata={'header': f"Mise à jour profil → {reason}"}
+            )
         else:
-            return {'result': "Erreur lors de la mise à jour de la carte d'identité.", 'metadata': {}}
+            return ToolResponseRecord(
+                tool_call_id=tool_call.id,
+                response_data={'error': "Échec de la mise à jour"},
+                created_at=datetime.now(timezone.utc)
+            )
     
     # CONFIGURATION -----------------------------------------------
     
@@ -387,9 +420,6 @@ class Chat(commands.Cog):
         # Ingérer TOUS les messages (pour le contexte)
         await self.gpt_api.ingest_message(message.channel, message)
         
-        # Incrémenter le compteur de messages pour la mémoire
-        self.memory.increment_message_count(message.author.id)
-        
         # Décider si on répond
         if not self.should_respond(message):
             return
@@ -436,7 +466,7 @@ class Chat(commands.Cog):
         
         # Construire le texte final
         if profiles_to_inject:
-            self._get_developer_prompt._user_profile = "CARTES D'IDENTITÉ DES UTILISATEURS:\n\n" + "\n\n".join(profiles_to_inject) + "\n"
+            self._get_developer_prompt._user_profile = "PROFILS DES UTILISATEURS:\n\n" + "\n\n".join(profiles_to_inject) + "\n"
         else:
             self._get_developer_prompt._user_profile = ''
         
@@ -448,7 +478,7 @@ class Chat(commands.Cog):
                     trigger_message=message
                 )
                 
-                # Planifier mise à jour du profil (async, non-bloquant)
+                # Gestion de la mémoire après réponse
                 # Récupérer les messages récents de l'utilisateur
                 recent_messages = []
                 async for msg in message.channel.history(limit=20):
@@ -456,6 +486,8 @@ class Chat(commands.Cog):
                         recent_messages.append(msg)
                 
                 if recent_messages:
+                    # Incrémenter le compteur et vérifier si mise à jour nécessaire
+                    self.memory.increment_message_count(message.author.id)
                     await self.memory.check_and_schedule_update(message.author.id, recent_messages)
                 
                 # Formater la réponse avec les headers des tools
@@ -664,7 +696,7 @@ class Chat(commands.Cog):
     
     @memory_group.command(name='show')
     async def memory_show(self, interaction: Interaction):
-        """Affiche votre carte d'identité enregistrée par MARIA."""
+        """Affiche votre profil enregistré par MARIA."""
         profile = self.memory.get_profile(interaction.user.id)
         
         if not profile or not profile.content:

@@ -1,5 +1,5 @@
 """### Memory > Profile
-Gestion des cartes d'identité utilisateur."""
+Gestion des profils utilisateur."""
 
 import logging
 from datetime import datetime, timezone
@@ -10,9 +10,9 @@ logger = logging.getLogger('MARI4.memory.profile')
 
 @dataclass
 class UserProfile:
-    """Carte d'identité d'un utilisateur."""
+    """Profil d'un utilisateur."""
     user_id: int
-    content: str  # Contenu de la carte (max 150 mots)
+    content: str  # Contenu du profil (max 150 mots)
     created_at: datetime
     updated_at: datetime
     messages_since_update: int = 0
@@ -39,7 +39,7 @@ class UserProfile:
         )
     
     def should_update(self) -> bool:
-        """Détermine si la carte doit être mise à jour automatiquement.
+        """Détermine si le profil doit être mis à jour automatiquement.
         
         Règles (moins fréquentes car l'IA peut déclencher manuellement):
         - Au moins 30 messages depuis dernière MAJ

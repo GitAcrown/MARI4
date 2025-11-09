@@ -153,6 +153,7 @@ class MemoryManager:
         if profile:
             profile.increment_messages()
             self._save_profile(profile)
+        # Si pas de profil, check_and_schedule_update créera le premier profil
     
     async def check_and_schedule_update(self, user_id: int, recent_messages: list[discord.Message]):
         """Vérifie si une mise à jour automatique est nécessaire et la planifie.
@@ -170,23 +171,51 @@ class MemoryManager:
             logger.debug(f"Mise à jour automatique planifiée pour user {user_id}")
     
     async def force_update(self, user_id: int, recent_messages: list[discord.Message]) -> bool:
-        """Force une mise à jour immédiate du profil (appelé par l'IA).
+        """Force une mise à jour immédiate et synchrone du profil (appelé par l'IA).
         
         Args:
             user_id: ID de l'utilisateur Discord
             recent_messages: Messages récents de l'utilisateur
             
         Returns:
-            True si la mise à jour a été planifiée, False sinon
+            True si la mise à jour a réussi, False sinon
         """
         if not recent_messages:
             logger.warning(f"Force update demandée pour user {user_id} mais pas de messages")
             return False
         
-        # Ajouter à la queue avec priorité (même si seuils pas atteints)
-        await self._update_queue.put((user_id, recent_messages))
-        logger.info(f"Mise à jour manuelle planifiée pour user {user_id} (déclenchée par l'IA)")
-        return True
+        try:
+            # Mise à jour synchrone (pas via la queue)
+            profile = self.get_profile(user_id)
+            current_content = profile.content if profile else None
+            
+            # Mettre à jour avec la mini IA
+            new_content = await self.updater.update_profile(current_content, recent_messages)
+            
+            if new_content:
+                # Sauvegarder
+                if profile:
+                    profile.content = new_content
+                    profile.reset_counter()
+                else:
+                    profile = UserProfile(
+                        user_id=user_id,
+                        content=new_content,
+                        created_at=datetime.now(timezone.utc),
+                        updated_at=datetime.now(timezone.utc),
+                        messages_since_update=0
+                    )
+                
+                self._save_profile(profile)
+                logger.info(f"Profil mis à jour immédiatement pour user {user_id} (déclenché par l'IA)")
+                return True
+            else:
+                logger.info(f"Aucune nouvelle info pour user {user_id}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Erreur force update: {e}")
+            return False
     
     def delete_profile(self, user_id: int) -> bool:
         """Supprime le profil d'un utilisateur.

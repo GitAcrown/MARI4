@@ -1,5 +1,5 @@
 """### Memory > Updater
-Mini IA pour mettre à jour les cartes d'identité."""
+Mini IA pour mettre à jour les profils utilisateur."""
 
 import logging
 from typing import Optional
@@ -11,7 +11,7 @@ logger = logging.getLogger('MARI4.memory.updater')
 
 # Modèle économique pour les mises à jour
 UPDATE_MODEL = 'gpt-4.1-nano'
-MAX_TOKENS = 300  # Limite pour la carte d'identité
+MAX_TOKENS = 300  # Limite pour le profil
 
 # Schéma Pydantic pour le profil
 class UserProfileSchema(BaseModel):
@@ -24,7 +24,7 @@ class UserProfileSchema(BaseModel):
     no_change: bool = False  # True si aucune nouvelle info
 
 # Prompt strict pour éviter les hallucinations
-PROFILE_UPDATE_PROMPT = """Tu dois mettre à jour une carte d'identité utilisateur pour une IA.
+PROFILE_UPDATE_PROMPT = """Tu dois mettre à jour un profil utilisateur pour une IA.
 
 RÈGLES STRICTES:
 1. N'écris QUE des faits explicitement mentionnés par l'utilisateur dans les messages récents
@@ -33,7 +33,7 @@ RÈGLES STRICTES:
 4. Chaque champ doit être concis mais informatif
 5. Si un champ n'a pas d'info, laisse-le vide ""
 
-Carte actuelle:
+Profil actuel:
 {current_profile}
 
 Derniers messages de l'utilisateur:
@@ -58,14 +58,14 @@ class ProfileUpdater:
         current_profile: Optional[str], 
         messages: list[discord.Message]
     ) -> Optional[str]:
-        """Met à jour une carte d'identité.
+        """Met à jour un profil utilisateur.
         
         Args:
-            current_profile: Carte actuelle (None si première fois)
+            current_profile: Profil actuel (None si première fois)
             messages: Derniers messages de l'utilisateur
             
         Returns:
-            Nouvelle carte ou None si aucun changement
+            Nouveau profil ou None si aucun changement
         """
         if not messages:
             return None
@@ -125,21 +125,21 @@ class ProfileUpdater:
             schema: Schéma Pydantic parsé
             
         Returns:
-            Texte formaté pour l'IA
+            Texte formaté lisible
         """
         parts = []
         if schema.identite:
-            parts.append(f"IDENTITÉ: {schema.identite}")
+            parts.append(f"**Identité:**\n{schema.identite}")
         if schema.activite:
-            parts.append(f"ACTIVITÉ: {schema.activite}")
+            parts.append(f"**Activité:**\n{schema.activite}")
         if schema.tech:
-            parts.append(f"TECH: {schema.tech}")
+            parts.append(f"**Tech:**\n{schema.tech}")
         if schema.preferences:
-            parts.append(f"PRÉFÉRENCES: {schema.preferences}")
+            parts.append(f"**Préférences:**\n{schema.preferences}")
         if schema.contexte:
-            parts.append(f"CONTEXTE: {schema.contexte}")
+            parts.append(f"**Contexte:**\n{schema.contexte}")
         
-        return " | ".join(parts)
+        return "\n\n".join(parts)
     
     def _format_messages(self, messages: list[discord.Message]) -> str:
         """Formate les messages pour le prompt."""

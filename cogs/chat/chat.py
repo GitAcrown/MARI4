@@ -62,6 +62,84 @@ MAX_EDITION_AGE = timedelta(minutes=2)
 
 # UI VIEWS --------------------------------------------------------
 
+class InfoView(ui.LayoutView):
+    """Vue simple pour afficher les informations du bot."""
+    def __init__(self, bot: commands.Bot, channel, context_stats: dict, stats: dict, client_stats: dict, session_stats: dict, config: str, tools: list):
+        super().__init__(timeout=300)
+        
+        container = ui.Container()
+        
+        # Header
+        header = ui.TextDisplay(f"## {bot.user.name}")
+        container.add_item(header)
+        subtitle = ui.TextDisplay("*Assistante IA pour Discord*")
+        container.add_item(subtitle)
+        container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.large))
+        
+        # Session
+        session_title = ui.TextDisplay(f"### Session · {channel.name}")
+        container.add_item(session_title)
+        
+        # Dernière réponse
+        if stats.get('last_completion'):
+            last = stats['last_completion']
+            delta = datetime.now(timezone.utc) - last
+            minutes = int(delta.total_seconds() / 60)
+            last_response = f"il y a {minutes}m"
+        else:
+            last_response = "jamais"
+        
+        session_text = f"**Messages en contexte** · `{context_stats['total_messages']}`\n"
+        session_text += f"**Tokens utilisés** · `{context_stats['total_tokens']} / 16k` ({context_stats['window_usage_pct']:.1f}%)\n"
+        session_text += f"**Dernière réponse** · {last_response}"
+        
+        session_info = ui.TextDisplay(session_text)
+        container.add_item(session_info)
+        container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.small))
+        
+        # Outils
+        if tools:
+            tools_title = ui.TextDisplay(f"### Outils disponibles · {len(tools)}")
+            container.add_item(tools_title)
+            
+            tools_list = ', '.join([t.name for t in tools[:5]])
+            if len(tools) > 5:
+                tools_list += f" et {len(tools) - 5} autres"
+            tools_display = ui.TextDisplay(tools_list)
+            container.add_item(tools_display)
+            container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.small))
+        
+        # Configuration
+        config_title = ui.TextDisplay("### Configuration serveur")
+        container.add_item(config_title)
+        
+        mode_text = {
+            'off': 'Désactivé',
+            'strict': 'Mentions directes uniquement',
+            'greedy': 'Mentions + nom du bot'
+        }.get(config, config.upper())
+        
+        config_info = ui.TextDisplay(f"**Mode** · `{mode_text}`")
+        container.add_item(config_info)
+        container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.small))
+        
+        # Stats globales
+        global_title = ui.TextDisplay("### Statistiques globales")
+        container.add_item(global_title)
+        
+        global_text = f"**Complétions** · `{client_stats['completions']}`\n"
+        global_text += f"**Transcriptions** · `{client_stats['transcriptions']}`\n"
+        global_text += f"**Sessions actives** · `{session_stats['active_sessions']}`"
+        
+        global_info = ui.TextDisplay(global_text)
+        container.add_item(global_info)
+        
+        container.add_item(ui.Separator())
+        footer = ui.TextDisplay("-# Utilisez /chatbot pour configurer MARIA")
+        container.add_item(footer)
+        
+        self.add_item(container)
+
 class ProfileModal(ui.Modal, title="Votre profil"):
     """Modal pour afficher et modifier le profil utilisateur."""
     
@@ -557,49 +635,23 @@ class Chat(commands.Cog):
         
         # Configuration
         config = self.get_guild_config(interaction.guild, 'chatbot_mode', str)
-        mode_text = {
-            'off': 'Désactivé',
-            'strict': 'Mentions directes uniquement',
-            'greedy': 'Mentions + nom du bot'
-        }.get(config, config.upper())
         
         # Outils
         tools = self.gpt_api.get_all_tools()
-        tools_list = ', '.join([t.name for t in tools[:5]])
-        if len(tools) > 5:
-            tools_list += f" et {len(tools) - 5} autres"
         
-        # Dernière réponse
-        if stats.get('last_completion'):
-            last = stats['last_completion']
-            delta = datetime.now(timezone.utc) - last
-            minutes = int(delta.total_seconds() / 60)
-            last_response = f"il y a {minutes}m"
-        else:
-            last_response = "jamais"
+        # Créer la vue
+        view = InfoView(
+            bot=self.bot,
+            channel=interaction.channel,
+            context_stats=context_stats,
+            stats=stats,
+            client_stats=client_stats,
+            session_stats=session_stats,
+            config=config,
+            tools=tools
+        )
         
-        # Construire le message
-        info_text = f"""**{self.bot.user.name}** · Assistante IA pour Discord
-
-**Session** · {interaction.channel.mention}
-Messages en contexte: `{context_stats['total_messages']}`
-Tokens utilisés: `{context_stats['total_tokens']} / 16k` ({context_stats['window_usage_pct']:.1f}%)
-Dernière réponse: {last_response}
-
-**Outils disponibles** · {len(tools)}
-{tools_list}
-
-**Configuration serveur**
-Mode: `{mode_text}`
-
-**Statistiques globales**
-Complétions: `{client_stats['completions']}`
-Transcriptions: `{client_stats['transcriptions']}`
-Sessions actives: `{session_stats['active_sessions']}`
-
--# Utilisez /chatbot pour configurer MARIA"""
-        
-        await interaction.response.send_message(info_text, ephemeral=True)
+        await interaction.response.send_message(view=view, ephemeral=True)
     
     # Groupe de commandes chatbot
     chatbot_group = app_commands.Group(

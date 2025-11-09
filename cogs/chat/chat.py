@@ -175,7 +175,13 @@ class ProfileEditModal(ui.Modal, title="Modifier votre profil"):
             profile.updated_at = datetime.now(timezone.utc)
             self.memory_manager._save_profile(profile)
             
-            # Recréer la vue avec le nouveau profil
+            # Répondre d'abord
+            await interaction.response.send_message(
+                "Profil mis à jour avec succès.",
+                ephemeral=True
+            )
+            
+            # Puis recréer et éditer la vue
             new_view = MemoryProfileView(
                 user=interaction.user,
                 profile=profile,
@@ -183,10 +189,6 @@ class ProfileEditModal(ui.Modal, title="Modifier votre profil"):
             )
             
             await self.original_message.edit(view=new_view)
-            await interaction.response.send_message(
-                "Profil mis à jour avec succès.",
-                ephemeral=True
-            )
         else:
             await interaction.response.send_message(
                 "Erreur lors de la mise à jour.",

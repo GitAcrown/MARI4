@@ -143,10 +143,11 @@ class InfoView(ui.LayoutView):
 class ProfileEditModal(ui.Modal, title="Modifier votre profil"):
     """Modal pour éditer le profil utilisateur."""
     
-    def __init__(self, memory_manager, user_id: int, current_content: str):
+    def __init__(self, memory_manager, user_id: int, current_content: str, original_message: discord.Message):
         super().__init__()
         self.memory_manager = memory_manager
         self.user_id = user_id
+        self.original_message = original_message
         
         self.content_input = ui.TextInput(
             label="Votre profil",
@@ -174,6 +175,14 @@ class ProfileEditModal(ui.Modal, title="Modifier votre profil"):
             profile.updated_at = datetime.now(timezone.utc)
             self.memory_manager._save_profile(profile)
             
+            # Recréer la vue avec le nouveau profil
+            new_view = MemoryProfileView(
+                user=interaction.user,
+                profile=profile,
+                memory_manager=self.memory_manager
+            )
+            
+            await self.original_message.edit(view=new_view)
             await interaction.response.send_message(
                 "Profil mis à jour avec succès.",
                 ephemeral=True
@@ -191,7 +200,7 @@ class ProfileEditButton(ui.Button['MemoryProfileView']):
     
     async def callback(self, interaction: Interaction):
         """Ouvre le modal d'édition."""
-        modal = ProfileEditModal(self.view.memory_manager, self.view.user.id, self.view.profile.content)
+        modal = ProfileEditModal(self.view.memory_manager, self.view.user.id, self.view.profile.content, interaction.message)
         await interaction.response.send_modal(modal)
 
 class ProfileResetButton(ui.Button['MemoryProfileView']):
@@ -203,9 +212,10 @@ class ProfileResetButton(ui.Button['MemoryProfileView']):
         """Efface le profil."""
         success = self.view.memory_manager.delete_profile(self.view.user.id)
         if success:
-            await interaction.response.send_message(
-                "Toutes vos informations ont été effacées.",
-                ephemeral=True
+            await interaction.response.edit_message(
+                content="Toutes vos informations ont été effacées.",
+                view=None,
+                embeds=[]
             )
             self.view.stop()
         else:

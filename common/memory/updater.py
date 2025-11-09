@@ -29,8 +29,7 @@ NOUVEAUX MESSAGES:
 {messages}
 
 INSTRUCTIONS:
-Écris un profil concis (5-8 phrases max) qui résume l'utilisateur.
-Inclus : nom/pseudo, âge, localisation, métier/études, compétences techniques, préférences, projets, autres infos pertinentes.
+Écris un profil très concis (~5 phrases max) qui résume UNIQUEMENT les faits mentionnés.
 
 Si tu trouves des nouvelles infos dans les messages:
 - Fusionne-les avec le profil actuel
@@ -40,13 +39,12 @@ Si AUCUNE nouvelle info pertinente:
 - Met "no_change" à TRUE
 - Copie le profil actuel tel quel dans "content"
 
-RÈGLES:
-- N'écris QUE des faits explicitement mentionnés
-- JAMAIS d'inférence ou de supposition
-- Style naturel et fluide (pas de liste à puces)
-- Concis mais complet
-
-Exemple: "Jean, 25 ans, développeur web à Paris. Utilise Python et React. Travaille sur un bot Discord. Préfère le café au thé." """
+RÈGLES STRICTES:
+- N'écris QUE des faits EXPLICITEMENT mentionnés par l'utilisateur
+- JAMAIS d'inférence, de supposition ou d'extrapolation
+- Si une info n'est pas claire ou certaine, ne l'écris pas
+- Style télégraphique et factuel
+- Maximum 3-5 phrases courtes"""
 
 class ProfileUpdater:
     """Mini IA pour mettre à jour les profils utilisateur."""

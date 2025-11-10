@@ -285,10 +285,10 @@ class Chat(commands.Cog):
         update_profile_tool = Tool(
             name='update_user_profile',
             description=(
-                "Enregistre les infos UTILES de l'auteur pour personnaliser les futures interactions. "
-                "A RETENIR: identite (prenom, age, metier, localisation), preferences de communication (ton, niveau de detail, sujets a eviter), "
-                "contexte personnel durable (projets, competences, centres d'interet recurrents), contraintes specifiques. "
-                "A NE PAS RETENIR: opinions temporaires, actions ponctuelles, questions posees, infos sur d'autres personnes, faits generaux. "
+                "Enregistre les infos UTILES de l'auteur pour personnaliser les futures interactions avec lui. "
+                "A RETENIR: identité (prenom, age, metier, localisation), préférences de communication (ton, niveau de détail, sujets à éviter), "
+                "contexte personnel durable (projets, compétences, centres d'intérêt récurrents), contraintes spécifiques. "
+                "A NE PAS RETENIR: opinions temporaires, actions ponctuelles, questions posées, infos sur d'autres personnes, faits généraux. "
                 "Utilise uniquement si l'auteur partage une info durable et nouvelle. JAMAIS pour d'autres personnes."
             ),
             properties={},

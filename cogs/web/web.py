@@ -23,8 +23,8 @@ logger = logging.getLogger(f'MARI4.{__name__.split(".")[-1]}')
 
 DEFAULT_CHUNK_SIZE = 2000
 DEFAULT_NUM_RESULTS = 5 
-DEFAULT_TIMEOUT = 15
-CACHE_EXPIRY_HOURS = 24
+DEFAULT_TIMEOUT = 20
+CACHE_EXPIRY_HOURS = 12
 
 # Headers pour éviter les blocages
 DEFAULT_HEADERS = {

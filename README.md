@@ -1,14 +1,24 @@
 # MARIA v4 (MARI4)
 
-Bot Discord conversationnel propulsé par GPT-5. Conversation naturelle, recherche web, transcription audio, mémoire long terme.
+Bot Discord conversationnel propulsé par GPT-5. MARIA tient des discussions naturelles, mémorise ce que les membres lui disent et peut gérer des rappels toute seule, sans intervention humaine.
 
 ## Fonctionnalités
 
-- **Conversation** : Contexte complet, ton naturel, se souvient des utilisateurs
-- **Recherche web** : Infos en temps réel avec sources
-- **Transcription** : Messages vocaux automatiques
-- **Calculs** : Expressions mathématiques
-- **Analyse** : Images et vidéos
+### Conversation
+- Comprend le fil de la discussion et adapte son ton.
+- Retient les préférences clairement exprimées par chaque membre.
+
+### Rappels autonomes
+- Comprend les demandes du type : “Rappelle-moi dans 2h…”.
+- Programme et exécute les rappels en arrière-plan, puis répond sur le message d’origine.
+- Permet à chacun de consulter/annuler ses rappels via la commande `/tasks`.
+- Limite volontairement les programmations en chaîne (max 5 dans une même réponse).
+
+### Outils pratiques
+- Recherche d’informations sur le web (sources fournies).
+- Transcription automatique des messages vocaux.
+- Analyse de visuels (selon les capacités du modèle).
+- Calculs et petites aides de productivité.
 
 ## Installation
 
@@ -32,9 +42,9 @@ python bot.py
 - `/info` - Statistiques du bot
 - `/chatbot mode` - Mode de réponse (off/strict/greedy)
 - `/chatbot forget` - Efface l'historique
-- `/memory show` - Affiche votre profil
-- `/memory reset` - Efface votre profil
+- `/memory` - Affiche votre profil mémorisé
+- `/tasks` - Vue interactive de vos tâches planifiées (annulation via bouton)
 
 ## Technologies
 
-Discord.py • OpenAI GPT-5 • DDGS • SQLite
+Discord.py · OpenAI GPT-5 · Recherche web DDGS · SQLite · LayoutView Discord UI

@@ -100,8 +100,16 @@ class InfoView(ui.LayoutView):
         else:
             last_response = "jamais"
         
+        context_window = context_stats.get('context_window', 0)
+        if context_window >= 1000:
+            limit_display = f"{context_window / 1000:.1f}k".rstrip('0').rstrip('.')
+        elif context_window > 0:
+            limit_display = str(context_window)
+        else:
+            limit_display = "?"
+        
         session_text = f"**Messages en contexte** · `{context_stats['total_messages']}`\n"
-        session_text += f"**Tokens utilisés** · `{context_stats['total_tokens']} / 32k` ({context_stats['window_usage_pct']:.1f}%)\n"
+        session_text += f"**Tokens utilisés** · `{context_stats['total_tokens']} / {limit_display}` ({context_stats['window_usage_pct']:.1f}%)\n"
         session_text += f"**Dernière réponse** · {last_response}"
         
         session_info = ui.TextDisplay(session_text)
@@ -412,7 +420,7 @@ class Chat(commands.Cog):
             completion_model='gpt-5-mini',
             transcription_model='gpt-4o-transcribe',
             max_completion_tokens=1024,
-            context_window=32768,  # 32k tokens
+            context_window=24576,  # 24k tokens
             context_age_hours=2  # 2h pour cohérence avec DEFAULT_CONTEXT_AGE
         )
         

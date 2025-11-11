@@ -17,7 +17,7 @@ logger = logging.getLogger(f'MARI4.llm.context')
 GPT_TOKENIZER = tiktoken.get_encoding('cl100k_base')
 
 # Configuration par défaut du contexte
-DEFAULT_CONTEXT_WINDOW = 512 * 64  # 32k tokens
+DEFAULT_CONTEXT_WINDOW = 24_576  # 24k tokens
 DEFAULT_CONTEXT_AGE = timedelta(hours=2)  # 2h
 
 
@@ -324,7 +324,8 @@ class ConversationContext:
             'total_tokens': total_tokens,
             'user_messages': user_count,
             'assistant_messages': assistant_count,
-            'window_usage_pct': (total_tokens / self.context_window * 100) if self.context_window > 0 else 0
+            'window_usage_pct': (total_tokens / self.context_window * 100) if self.context_window > 0 else 0,
+            'context_window': self.context_window
         }
     
     def filter_images(self) -> None:

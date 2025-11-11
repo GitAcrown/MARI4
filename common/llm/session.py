@@ -2,6 +2,7 @@
 Gestion des sessions de conversation par salon avec contrôle de concurrence."""
 
 import asyncio
+import copy
 import json
 import logging
 import re
@@ -229,41 +230,105 @@ class ChannelSession:
             AssistantRecord avec la réponse
         """
         async with self._lock:
-            # Sauvegarder le contexte complet
-            now = datetime.now(timezone.utc)
-            all_messages = self.context._messages
-            
-            # Filtrer temporairement pour garder seulement les messages anciens (> 5 min)
-            self.context._messages = [
-                m for m in all_messages
-                if (now - m.created_at).total_seconds() > 300  # 5 minutes
-            ]
-            
+            # Contexte isolé pour l'exécution de la tâche
+            isolated_context = ConversationContext(
+                developer_prompt=self.developer_prompt_template(),
+                context_window=self.context.context_window,
+                context_age=self.context.context_age
+            )
+
+            # Message utilisateur synthétique (non réinjecté ensuite)
+            isolated_context.add_user_message(
+                components=[TextComponent(task_prompt)],
+                name=user_name,
+                discord_message=None,
+                autonomous_task=True,
+                task_owner_id=user_id
+            )
+
+            # Sauvegarder l'état courant
+            original_context = self.context
+            original_tool_counter = self._tool_call_counter
+            self.context = isolated_context
+            self._tool_call_counter = None
+
             try:
-                # Créer un message utilisateur directement depuis le texte
-                components = [TextComponent(f"[{user_id}] {user_name} ({user_id}): {task_prompt}")]
-                
-                self.context.add_user_message(
-                    components=components,
-                    name=user_name,
-                    discord_message=None
+                # Indice à partir duquel copier les messages (on ignore le user synthétique)
+                start_index = len(isolated_context._messages)
+
+                # Exécuter la complétion dans le contexte isolé
+                final_assistant = await self._run_completion_unsafe(None)
+
+                # Collecter les nouveaux messages (assistant + outils)
+                new_messages = isolated_context._messages[start_index:]
+
+            finally:
+                # Restaurer le contexte original
+                self.context = original_context
+                self._tool_call_counter = original_tool_counter
+
+            def _clone_component(component: ContentComponent) -> ContentComponent:
+                """Clone léger d'un composant pour le réinjecter dans le contexte principal."""
+                if component.type == 'text':
+                    return TextComponent(component.data.get('text', ''))
+                if component.type == 'image_url':
+                    image_data = component.data.get('image_url', {})
+                    return ImageComponent(
+                        image_data.get('url', ''),
+                        detail=image_data.get('detail', 'auto')
+                    )
+                # Fallback: transformer en simple texte
+                return TextComponent(component.data.get('text', ''))
+
+            assistant_record: Optional[AssistantRecord] = None
+
+            for message in new_messages:
+                if message.role == 'assistant':
+                    cloned_components = [_clone_component(comp) for comp in message.components]
+                    cloned_tool_calls = []
+                    if isinstance(message, AssistantRecord) and message.tool_calls:
+                        for call in message.tool_calls:
+                            cloned_tool_calls.append(
+                                ToolCallRecord(
+                                    id=call.id,
+                                    function_name=call.function_name,
+                                    arguments=copy.deepcopy(call.arguments)
+                                )
+                            )
+
+                    metadata = dict(message.metadata)
+                    metadata['autonomous_task'] = True
+                    metadata['task_owner_id'] = user_id
+
+                    assistant_record = self.context.add_assistant_message(
+                        components=cloned_components,
+                        tool_calls=cloned_tool_calls or None,
+                        finish_reason=getattr(message, 'finish_reason', None),
+                        metadata=metadata
+                    )
+
+                elif message.role == 'tool' and isinstance(message, ToolResponseRecord):
+                    metadata = dict(message.metadata)
+                    metadata['autonomous_task'] = True
+                    metadata['task_owner_id'] = user_id
+                    self.context.add_tool_response(
+                        tool_call_id=message.tool_call_id,
+                        response_data=copy.deepcopy(message.response_data),
+                        **metadata
+                    )
+
+            if assistant_record is None:
+                # Sécurité : ne jamais retourner None
+                assistant_record = self.context.add_assistant_message(
+                    components=[TextComponent("Échec de la tâche autonome (réponse vide).")],
+                    metadata={
+                        'autonomous_task': True,
+                        'task_owner_id': user_id,
+                        'error': True
+                    }
                 )
-                
-                # Exécuter la complétion avec le contexte filtré
-                assistant_record = await self._run_completion_unsafe(None)
-                
-                # Restaurer le contexte complet
-                # Les nouveaux messages (tâche + réponse) sont déjà dans _messages
-                new_messages = [m for m in self.context._messages if m not in all_messages]
-                self.context._messages = all_messages + new_messages
-                
-                return assistant_record
-                
-            except Exception:
-                # En cas d'erreur, restaurer quand même le contexte
-                new_messages = [m for m in self.context._messages if m not in all_messages]
-                self.context._messages = all_messages + new_messages
-                raise
+
+            return assistant_record
     
     async def _run_completion_unsafe(self, trigger_message: Optional[discord.Message]) -> AssistantRecord:
         """Version non-thread-safe de la complétion."""

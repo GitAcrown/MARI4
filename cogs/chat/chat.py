@@ -545,22 +545,27 @@ class Chat(commands.Cog):
         
         # Formater le prompt de la tâche avec instructions spéciales
         task_prompt = f"""[TÂCHE AUTONOME PROGRAMMÉE]
-{task_description}
+Demande initiale de {user.name} ({user.id}) : {task_description}
 
-IMPORTANT: Ceci est une tâche autonome que tu as programmée. L'utilisateur n'est pas présent pour répondre.
-- Ne pose AUCUNE question subsidiaire
-- Fais de ton mieux avec les informations disponibles
-- Si tu dois chercher des informations, utilise tes outils (recherche web, etc.)
-- Donne une réponse complète et directe
-- Si tu ne peux pas accomplir la tâche entièrement, explique ce que tu as pu faire"""
+Tu exécutes maintenant la tâche que TU as programmée précédemment à la demande de {user.name}.
+IMPORTANT :
+- Ne pose AUCUNE question subsidiaire (personne ne répondra)
+- Fais de ton mieux avec les informations dont tu disposes
+- Utilise tes outils (recherche web, etc.) si nécessaire
+- Donne un compte rendu clair de ce que tu as fait ou trouvé
+- Si tu ne peux pas tout faire, explique précisément ce que tu as réussi à accomplir"""
         
         # Exécuter via l'API propre (sans fake message et sans typing)
-        response = await self.gpt_api.run_autonomous_task(
-            channel=channel,
-            user_name=user.name,
-            user_id=user.id,
-            task_prompt=task_prompt
-        )
+        try:
+            response = await self.gpt_api.run_autonomous_task(
+                channel=channel,
+                user_name=user.name,
+                user_id=user.id,
+                task_prompt=task_prompt
+            )
+        finally:
+            # Toujours réinitialiser le profil injecté pour ne pas contaminer les prochaines requêtes
+            self._get_developer_prompt._user_profile = ''
         
         # Formater la réponse avec headers des outils
         text = response.text

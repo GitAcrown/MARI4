@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import re
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Optional, Callable
 
@@ -14,7 +15,7 @@ from .client import MariaLLMClient
 from .context import (
     ConversationContext, MessageRecord, AssistantRecord, 
     TextComponent, ImageComponent, MetadataComponent,
-    ToolCallRecord, ContentComponent
+    ToolCallRecord, ContentComponent, ToolResponseRecord
 )
 from .tools import ToolRegistry
 from .attachments import AttachmentCache, process_attachment
@@ -72,6 +73,8 @@ class ChannelSession:
             'messages_ingested': 0,
             'last_completion': None
         }
+        # Compteur des appels d'outils dans la complétion en cours
+        self._tool_call_counter: Optional[defaultdict[str, int]] = None
         
         # Message ayant déclenché la complétion en cours
         self.trigger_message: Optional[discord.Message] = None
@@ -209,108 +212,188 @@ class ChannelSession:
         async with self._lock:
             return await self._run_completion_unsafe(trigger_message)
     
+    async def run_autonomous_task(self, user_name: str, user_id: int, task_prompt: str) -> AssistantRecord:
+        """Exécute une tâche autonome sans message Discord.
+        
+        Exécute la tâche de manière ISOLÉE du contexte récent pour éviter toute contamination,
+        puis ajoute le résultat au contexte partagé.
+        
+        Thread-safe via lock - une seule complétion à la fois.
+        
+        Args:
+            user_name: Nom de l'utilisateur concerné
+            user_id: ID de l'utilisateur
+            task_prompt: Prompt de la tâche à exécuter
+            
+        Returns:
+            AssistantRecord avec la réponse
+        """
+        async with self._lock:
+            # Sauvegarder le contexte complet
+            now = datetime.now(timezone.utc)
+            all_messages = self.context._messages
+            
+            # Filtrer temporairement pour garder seulement les messages anciens (> 5 min)
+            self.context._messages = [
+                m for m in all_messages
+                if (now - m.created_at).total_seconds() > 300  # 5 minutes
+            ]
+            
+            try:
+                # Créer un message utilisateur directement depuis le texte
+                components = [TextComponent(f"[{user_id}] {user_name} ({user_id}): {task_prompt}")]
+                
+                self.context.add_user_message(
+                    components=components,
+                    name=user_name,
+                    discord_message=None
+                )
+                
+                # Exécuter la complétion avec le contexte filtré
+                assistant_record = await self._run_completion_unsafe(None)
+                
+                # Restaurer le contexte complet
+                # Les nouveaux messages (tâche + réponse) sont déjà dans _messages
+                new_messages = [m for m in self.context._messages if m not in all_messages]
+                self.context._messages = all_messages + new_messages
+                
+                return assistant_record
+                
+            except Exception:
+                # En cas d'erreur, restaurer quand même le contexte
+                new_messages = [m for m in self.context._messages if m not in all_messages]
+                self.context._messages = all_messages + new_messages
+                raise
+    
     async def _run_completion_unsafe(self, trigger_message: Optional[discord.Message]) -> AssistantRecord:
         """Version non-thread-safe de la complétion."""
-        # Stocker le trigger_message pour les outils
-        self.trigger_message = trigger_message
-        
-        # Traiter les pièces jointes du dernier message si nécessaire
-        if trigger_message:
-            attachment_components = await self.process_attachments(trigger_message)
-            if attachment_components:
-                # Ajouter au dernier message utilisateur
-                recent = self.context.get_recent_messages(1)
-                if recent and recent[0].role == 'user':
-                    recent[0].components.extend(attachment_components)
-        
-        # Mettre à jour le prompt développeur
-        self.context.developer_prompt = self.developer_prompt_template()
-        
-        # Préparer le payload
+        is_root_call = self._tool_call_counter is None
+        if is_root_call:
+            self._tool_call_counter = defaultdict(int)
         try:
-            messages = self.context.prepare_payload()
-        except Exception as e:
-            logger.error(f"Erreur préparation payload: {e}")
-            raise
-        
-        # Outils compilés
-        tools = self.tool_registry.get_compiled() if len(self.tool_registry) > 0 else []
-        
-        # Appel API
-        try:
-            completion = await self.client.create_completion(
-                messages=messages,
-                tools=tools if tools else None
-            )
-        except Exception as e:
-            # Retry sans images en cas d'erreur invalid_image_url
-            if 'invalid_image_url' in str(e):
-                logger.warning("Erreur invalid_image_url, retry sans images")
-                self.context.filter_images()
+            # Stocker le trigger_message pour les outils
+            self.trigger_message = trigger_message
+            
+            # Traiter les pièces jointes du dernier message si nécessaire
+            if trigger_message:
+                attachment_components = await self.process_attachments(trigger_message)
+                if attachment_components:
+                    # Ajouter au dernier message utilisateur
+                    recent = self.context.get_recent_messages(1)
+                    if recent and recent[0].role == 'user':
+                        recent[0].components.extend(attachment_components)
+            
+            # Mettre à jour le prompt développeur
+            self.context.developer_prompt = self.developer_prompt_template()
+            
+            # Préparer le payload
+            try:
                 messages = self.context.prepare_payload()
+            except Exception as e:
+                logger.error(f"Erreur préparation payload: {e}")
+                raise
+            
+            # Outils compilés
+            tools = self.tool_registry.get_compiled() if len(self.tool_registry) > 0 else []
+            
+            # Appel API
+            try:
                 completion = await self.client.create_completion(
                     messages=messages,
                     tools=tools if tools else None
                 )
+            except Exception as e:
+                # Retry sans images en cas d'erreur invalid_image_url
+                if 'invalid_image_url' in str(e):
+                    logger.warning("Erreur invalid_image_url, retry sans images")
+                    self.context.filter_images()
+                    messages = self.context.prepare_payload()
+                    completion = await self.client.create_completion(
+                        messages=messages,
+                        tools=tools if tools else None
+                    )
+                else:
+                    raise
+            
+            # Conversion en AssistantRecord
+            choice = completion.choices[0]
+            message_obj = choice.message
+            
+            # Composants
+            components = []
+            if message_obj.content:
+                components.append(TextComponent(message_obj.content))
             else:
-                raise
-        
-        # Conversion en AssistantRecord
-        choice = completion.choices[0]
-        message_obj = choice.message
-        
-        # Composants
-        components = []
-        if message_obj.content:
-            components.append(TextComponent(message_obj.content))
-        else:
-            components.append(MetadataComponent('EMPTY'))
-        
-        # Tool calls
-        tool_calls = []
-        if message_obj.tool_calls:
-            for tc in message_obj.tool_calls:
-                tool_calls.append(ToolCallRecord(
-                    id=tc.id,
-                    function_name=tc.function.name,
-                    arguments=json.loads(tc.function.arguments)
-                ))
-        
-        # Créer l'assistant record
-        assistant_record = self.context.add_assistant_message(
-            components=components,
-            tool_calls=tool_calls,
-            finish_reason=choice.finish_reason
-        )
-        
-        # Exécuter les tools si nécessaire
-        if tool_calls:
-            await self._execute_tools(tool_calls)
-            # Récursion pour obtenir la réponse finale
-            return await self._run_completion_unsafe(None)
-        
-        # Si la réponse est vide (pas de contenu), retry une fois
-        if not message_obj.content or not message_obj.content.strip():
-            logger.warning("Réponse vide reçue, retry...")
-            # Supprimer le message vide du contexte
-            if self.context._messages and self.context._messages[-1] == assistant_record:
-                self.context._messages.pop()
-            # Ajouter un message système pour forcer une réponse
-            self.context.add_user_message(
-                components=[TextComponent("[SYSTEM] Reponds maintenant au dernier message.")],
-                name="system"
+                components.append(MetadataComponent('EMPTY'))
+            
+            # Tool calls
+            tool_calls = []
+            if message_obj.tool_calls:
+                for tc in message_obj.tool_calls:
+                    tool_calls.append(ToolCallRecord(
+                        id=tc.id,
+                        function_name=tc.function.name,
+                        arguments=json.loads(tc.function.arguments)
+                    ))
+            
+            # Créer l'assistant record
+            assistant_record = self.context.add_assistant_message(
+                components=components,
+                tool_calls=tool_calls,
+                finish_reason=choice.finish_reason
             )
-            return await self._run_completion_unsafe(None)
-        
-        self._stats['completions'] += 1
-        self._stats['last_completion'] = datetime.now(timezone.utc)
-        
-        logger.info(f"Complétion réussie pour salon {self.channel_id}")
-        return assistant_record
+            
+            # Exécuter les tools si nécessaire
+            if tool_calls:
+                await self._execute_tools(tool_calls)
+                # Récursion pour obtenir la réponse finale
+                return await self._run_completion_unsafe(None)
+            
+            # Si la réponse est vide (pas de contenu), retry une fois
+            if not message_obj.content or not message_obj.content.strip():
+                logger.warning("Réponse vide reçue, retry...")
+                # Supprimer le message vide du contexte
+                if self.context._messages and self.context._messages[-1] == assistant_record:
+                    self.context._messages.pop()
+                # Ajouter un message système pour forcer une réponse
+                self.context.add_user_message(
+                    components=[TextComponent("[SYSTEM] Reponds maintenant au dernier message.")],
+                    name="system"
+                )
+                return await self._run_completion_unsafe(None)
+            
+            self._stats['completions'] += 1
+            self._stats['last_completion'] = datetime.now(timezone.utc)
+            
+            logger.info(f"Complétion réussie pour salon {self.channel_id}")
+            return assistant_record
+        finally:
+            if is_root_call:
+                self._tool_call_counter = None
     
     async def _execute_tools(self, tool_calls: list[ToolCallRecord]) -> None:
         """Exécute les appels d'outils et ajoute les réponses au contexte."""
         for tool_call in tool_calls:
+            if self._tool_call_counter is None:
+                self._tool_call_counter = defaultdict(int)
+            
+            if tool_call.function_name == 'schedule_task':
+                self._tool_call_counter[tool_call.function_name] += 1
+                if self._tool_call_counter[tool_call.function_name] > 5:
+                    logger.warning("Limite de planification en chaîne atteinte")
+                    response = ToolResponseRecord(
+                        tool_call_id=tool_call.id,
+                        response_data={
+                            'error': "Limite atteinte : maximum 5 tâches programmées dans la même exécution."
+                        },
+                        created_at=datetime.now(timezone.utc),
+                        metadata={'header': "Limite de planification atteinte"}
+                    )
+                    self.context.add_message(response)
+                    continue
+            else:
+                self._tool_call_counter[tool_call.function_name] += 1
+            
             tool = self.tool_registry.get(tool_call.function_name)
             if not tool:
                 logger.warning(f"Outil '{tool_call.function_name}' non trouvé")

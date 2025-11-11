@@ -176,8 +176,12 @@ class ModelDataManager:
     # --- Connexions ---
     
     def __get_connection(self, path: Path) -> sqlite3.Connection:
-        conn = sqlite3.connect(path)
+        conn = sqlite3.connect(path, timeout=30.0)
         conn.row_factory = sqlite3.Row
+        
+        # Activer le mode WAL pour permettre les lectures concurrentes
+        conn.execute('PRAGMA journal_mode=WAL')
+        conn.execute('PRAGMA busy_timeout=30000')  # 30 secondes de retry automatique
         
         # Initialisation des tables (défaults)
         commit_on_close = False

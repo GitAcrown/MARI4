@@ -1,6 +1,7 @@
 """### Chat Cog
 Chatbot principal utilisant la nouvelle API GPT."""
 
+import asyncio
 import logging
 import re
 import zoneinfo
@@ -15,6 +16,7 @@ from discord.ext import commands
 from common import dataio
 from common.llm import MariaGptApi, Tool, ToolCallRecord, ToolResponseRecord
 from common.memory import MemoryManager
+from .scheduler import TaskScheduler, ScheduledTask
 
 logger = logging.getLogger(f'MARI4.{__name__.split(".")[-1]}')
 
@@ -22,6 +24,9 @@ logger = logging.getLogger(f'MARI4.{__name__.split(".")[-1]}')
 
 # Fuseau horaire de Paris
 PARIS_TZ = zoneinfo.ZoneInfo("Europe/Paris")
+
+# Base de données pour les tâches planifiées
+SCHEDULER_DB_PATH = 'data/scheduler.db'
 
 # Template du prompt développeur
 DEVELOPER_PROMPT_TEMPLATE = lambda args: f"""Tu es un bot nommée MARIA sur un salon écrit Discord. Tu es genrée au féminin.
@@ -141,10 +146,159 @@ class InfoView(ui.LayoutView):
         container.add_item(global_info)
         
         container.add_item(ui.Separator())
-        footer = ui.TextDisplay("-# Utilisez /chatbot pour configurer MARIA")
+        footer = ui.TextDisplay("-# Utilisez `/chatbot` pour configurer MARIA")
         container.add_item(footer)
         
         self.add_item(container)
+
+class TasksListView(ui.LayoutView):
+    """Vue pour afficher la liste des tâches planifiées."""
+    
+    def __init__(self, tasks: list[ScheduledTask], bot: commands.Bot):
+        super().__init__(timeout=300)
+        self.tasks = tasks
+        self.bot = bot
+        self._setup_layout()
+    
+    def _setup_layout(self):
+        """Configure la mise en page."""
+        container = ui.Container()
+        
+        # Header
+        header = ui.TextDisplay(f"## Tâches planifiées")
+        container.add_item(header)
+        subtitle = ui.TextDisplay(f"-# {len(self.tasks)} tâche(s) affichée(s)")
+        container.add_item(subtitle)
+        container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.large))
+        
+        # Afficher les tâches
+        for i, task in enumerate(self.tasks):
+            # Statut
+            status_text = {
+                'pending': 'En attente',
+                'completed': 'Terminée',
+                'failed': 'Échouée',
+                'cancelled': 'Annulée'
+            }.get(task.status, task.status)
+            
+            # Titre de la tâche
+            task_title = ui.TextDisplay(f"### Tâche #{task.id} · {status_text}")
+            container.add_item(task_title)
+            
+            # Informations
+            execute_at_paris = task.execute_at.astimezone(PARIS_TZ)
+            execute_str = execute_at_paris.strftime("%d/%m/%Y à %H:%M")
+            execute_timestamp = int(task.execute_at.timestamp())
+            
+            info_text = f"**Exécution** · {execute_str} (<t:{execute_timestamp}:R>)\n"
+            info_text += f"**Utilisateur** · <@{task.user_id}>\n"
+            info_text += f"**Description** · {task.task_description}"
+            
+            task_info = ui.TextDisplay(info_text)
+            container.add_item(task_info)
+            
+            # Séparateur entre les tâches
+            if i < len(self.tasks) - 1:
+                container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.small))
+        
+        # Footer
+        container.add_item(ui.Separator())
+        footer = ui.TextDisplay("-# Utilisez !canceltask <id> pour annuler une tâche")
+        container.add_item(footer)
+        
+        self.add_item(container)
+
+class UserTasksView(ui.LayoutView):
+    """Vue interactive pour gérer ses propres tâches planifiées."""
+    
+    def __init__(self, tasks: list[ScheduledTask], user: discord.User, scheduler):
+        super().__init__(timeout=300)
+        self.tasks = tasks
+        self.user = user
+        self.scheduler = scheduler
+        self._setup_layout()
+    
+    def _setup_layout(self):
+        """Configure la mise en page avec boutons interactifs."""
+        container = ui.Container()
+        
+        # Header
+        header = ui.TextDisplay(f"## Mes tâches planifiées")
+        container.add_item(header)
+        subtitle = ui.TextDisplay(f"-# {len(self.tasks)} tâche(s)")
+        container.add_item(subtitle)
+        container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.large))
+        
+        if not self.tasks:
+            no_tasks = ui.TextDisplay("Aucune tâche en attente pour le moment.")
+            container.add_item(no_tasks)
+        else:
+            # Afficher les tâches en attente avec boutons
+            for i, task in enumerate(self.tasks):
+                # Informations
+                execute_timestamp = int(task.execute_at.timestamp())
+                
+                info_text = f"### ⏳ Tâche #{task.id}\n"
+                info_text += f"**Exécution** · <t:{execute_timestamp}:f> (<t:{execute_timestamp}:R>)\n"
+                info_text += f"**Description** · {task.task_description}"
+                
+                task_info = ui.TextDisplay(info_text)
+                
+                # Bouton annuler (toutes les tâches affichées sont pending)
+                cancel_btn = CancelTaskButton(task.id, self.user.id, self.scheduler)
+                
+                # Créer la section
+                section = ui.Section(task_info, accessory=cancel_btn)
+                
+                container.add_item(section)
+                
+                # Séparateur entre les tâches
+                if i < len(self.tasks) - 1:
+                    container.add_item(ui.Separator(spacing=discord.SeparatorSpacing.small))
+        
+        # Footer
+        container.add_item(ui.Separator())
+        footer = ui.TextDisplay("-# Demandez à MARIA pour programmer de nouvelles tâches")
+        container.add_item(footer)
+        
+        self.add_item(container)
+
+class CancelTaskButton(ui.Button):
+    """Bouton pour annuler une tâche."""
+    
+    def __init__(self, task_id: int, user_id: int, scheduler):
+        super().__init__(
+            style=discord.ButtonStyle.danger,
+            label="Annuler",
+            custom_id=f"cancel_task_{task_id}"
+        )
+        self.task_id = task_id
+        self.user_id = user_id
+        self.scheduler = scheduler
+    
+    async def callback(self, interaction: discord.Interaction):
+        """Annule la tâche quand le bouton est cliqué."""
+        # Vérifier que c'est bien l'utilisateur concerné
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "Cette tâche ne vous appartient pas.",
+                ephemeral=True
+            )
+            return
+        
+        # Annuler la tâche
+        success = self.scheduler.cancel_task(self.task_id, user_id=self.user_id)
+        
+        if success:
+            # Rafraîchir l'affichage directement (sans message)
+            tasks = self.scheduler.get_user_tasks(self.user_id)
+            new_view = UserTasksView(tasks, interaction.user, self.scheduler)
+            await interaction.response.edit_message(view=new_view)
+        else:
+            await interaction.response.send_message(
+                f"Impossible d'annuler la tâche #{self.task_id}.",
+                ephemeral=True
+            )
 
 class ProfileModal(ui.Modal, title="Votre profil"):
     """Modal pour afficher et modifier le profil utilisateur."""
@@ -232,6 +386,12 @@ class Chat(commands.Cog):
         self.memory = MemoryManager(api_key=self.bot.config['OPENAI_API_KEY'])
         self.memory.start_background_updater()
         
+        # Système de tâches planifiées
+        self.scheduler = TaskScheduler(
+            db_path=SCHEDULER_DB_PATH,
+            executor=self._execute_autonomous_task
+        )
+        
         # Fonction pour générer le prompt système dynamiquement
         def get_developer_prompt():
             """Génère le prompt système avec date/heure actuelle et profils utilisateurs."""
@@ -253,7 +413,7 @@ class Chat(commands.Cog):
             transcription_model='gpt-4o-transcribe',
             max_completion_tokens=1024,
             context_window=32768,  # 32k tokens
-            context_age_hours=6
+            context_age_hours=2  # 2h pour cohérence avec DEFAULT_CONTEXT_AGE
         )
         
         # Messages déjà traités (éviter doublons)
@@ -263,11 +423,14 @@ class Chat(commands.Cog):
     
     async def cog_load(self):
         """Appelé quand le cog est chargé."""
-        # Les outils seront enregistrés dans bot.py après que tous les cogs soient chargés
-        pass
+        # Démarrer le worker de tâches planifiées
+        await self.scheduler.start_worker()
+        logger.info("Scheduler worker démarré")
     
     async def cog_unload(self):
         """Appelé quand le cog est déchargé."""
+        # Arrêter le worker proprement
+        await self.scheduler.stop_worker()
         await self.memory.close()
         await self.gpt_api.close()
         self.data.close_all()
@@ -296,11 +459,290 @@ class Chat(commands.Cog):
         )
         tools.append(update_profile_tool)
         
+        schedule_task_tool = Tool(
+            name='schedule_task',
+            description=(
+                "Programme une tâche à exécuter plus tard de manière autonome. "
+                "Tu pourras utiliser tous tes outils (recherche web, etc.) au moment de l'exécution. "
+                "UTILISE POUR: rappels, recherches différées, messages programmés. "
+                "EXEMPLES: 'Rappelle-moi de sortir les poubelles dans 2h', 'Recherche les news sur SpaceX demain matin', "
+                "'Envoie un résumé des messages importants ce soir à 20h'. "
+                "Le système te réveillera automatiquement au moment prévu pour exécuter la tâche."
+            ),
+            properties={
+                'task_description': {
+                    'type': 'string',
+                    'description': "Description claire de la tâche à exécuter (ex: 'Rappeler à l'utilisateur de sortir les poubelles')"
+                },
+                'delay_minutes': {
+                    'type': 'integer',
+                    'description': "Délai en minutes avant l'exécution (ex: 120 pour 2 heures)"
+                },
+                'delay_hours': {
+                    'type': 'integer',
+                    'description': "Délai en heures avant l'exécution (ex: 24 pour demain)"
+                }
+            },
+            function=self._tool_schedule_task
+        )
+        tools.append(schedule_task_tool)
+        
+        cancel_task_tool = Tool(
+            name='cancel_scheduled_task',
+            description=(
+                "Annule une tâche programmée précédemment. "
+                "L'utilisateur doit être l'auteur de la tâche pour pouvoir l'annuler. "
+                "UTILISE POUR: annuler un rappel, supprimer une tâche programmée. "
+                "EXEMPLES: 'Annule le rappel', 'Oublie la tâche que je t'ai demandée'. "
+                "Tu dois connaître l'ID de la tâche (visible quand elle est créée)."
+            ),
+            properties={
+                'task_id': {
+                    'type': 'integer',
+                    'description': "ID de la tâche à annuler (reçu lors de la création)"
+                }
+            },
+            function=self._tool_cancel_scheduled_task
+        )
+        tools.append(cancel_task_tool)
+        
         if tools:
             self.gpt_api.add_tools(*tools)
             logger.info(f"Total outils enregistrés: {len(tools)}")
     
+    # EXÉCUTEUR DE TÂCHES -----------------------------------------
+    
+    async def _execute_autonomous_task(self, channel_id: int, user_id: int, task_description: str, message_id: int = 0):
+        """Exécute une tâche autonome via l'API GPT propre."""
+        # Récupérer le salon
+        channel = self.bot.get_channel(channel_id)
+        if not channel:
+            logger.warning(f"Salon {channel_id} introuvable (supprimé ou bot expulsé)")
+            return  # Ne pas raise, juste skip la tâche
+        
+        # Récupérer l'utilisateur
+        try:
+            user = await self.bot.fetch_user(user_id)
+        except:
+            logger.warning(f"Utilisateur {user_id} introuvable")
+            return  # Ne pas raise, juste skip la tâche
+        
+        # Récupérer le message d'origine si disponible
+        original_message = None
+        if message_id:
+            try:
+                original_message = await channel.fetch_message(message_id)
+            except:
+                logger.warning(f"Message d'origine {message_id} introuvable")
+                # Continuer sans reply
+        
+        # Injecter le profil utilisateur dans le prompt développeur
+        author_profile = self.memory.get_profile_text(user.id)
+        if author_profile:
+            self._get_developer_prompt._user_profile = f"PROFILS:\n\n**{user.name}** (auteur):\n{author_profile}\n"
+        else:
+            self._get_developer_prompt._user_profile = ''
+        
+        # Formater le prompt de la tâche avec instructions spéciales
+        task_prompt = f"""[TÂCHE AUTONOME PROGRAMMÉE]
+{task_description}
+
+IMPORTANT: Ceci est une tâche autonome que tu as programmée. L'utilisateur n'est pas présent pour répondre.
+- Ne pose AUCUNE question subsidiaire
+- Fais de ton mieux avec les informations disponibles
+- Si tu dois chercher des informations, utilise tes outils (recherche web, etc.)
+- Donne une réponse complète et directe
+- Si tu ne peux pas accomplir la tâche entièrement, explique ce que tu as pu faire"""
+        
+        # Exécuter via l'API propre (sans fake message et sans typing)
+        response = await self.gpt_api.run_autonomous_task(
+            channel=channel,
+            user_name=user.name,
+            user_id=user.id,
+            task_prompt=task_prompt
+        )
+        
+        # Formater la réponse avec headers des outils
+        text = response.text
+        if response.tool_responses:
+            headers = [tr.metadata.get('header') for tr in response.tool_responses if tr.metadata.get('header')]
+            if headers:
+                headers = list(dict.fromkeys(headers))
+                text = '\n-# ' + '\n-# '.join(headers) + '\n' + text
+        
+        # Ajouter un footer avec mention si pas de message d'origine
+        if not original_message:
+            text += f"\n\n-# <@{user.id}>"
+        
+        # Envoyer en reply au message d'origine ou normalement
+        try:
+            if len(text) <= 2000:
+                if original_message:
+                    await original_message.reply(text)
+                else:
+                    await channel.send(text)
+            else:
+                # Découper si nécessaire
+                chunks = []
+                while len(text) > 1900:
+                    chunk = text[:1900]
+                    text = text[1900:]
+                    chunks.append(chunk)
+                chunks.append(text)
+                
+                for i, chunk in enumerate(chunks):
+                    if i == 0:
+                        if original_message:
+                            await original_message.reply(chunk)
+                        else:
+                            await channel.send(chunk)
+                    else:
+                        await channel.send(chunk)
+        except discord.Forbidden:
+            logger.error(f"Pas de permission pour envoyer dans {channel.id}")
+            raise  # Re-raise pour marquer la tâche comme failed
+        except discord.HTTPException as e:
+            logger.error(f"Erreur HTTP Discord: {e}")
+            raise  # Re-raise pour marquer la tâche comme failed
+    
     # OUTILS ------------------------------------------------------
+    
+    async def _tool_schedule_task(self, tool_call: ToolCallRecord, context_data) -> ToolResponseRecord:
+        """Programme une tâche à exécuter plus tard de manière autonome."""
+        logger.debug("_tool_schedule_task appelé")
+        if not context_data or not hasattr(context_data, 'trigger_message') or not context_data.trigger_message:
+            return ToolResponseRecord(
+                tool_call_id=tool_call.id,
+                response_data={'error': "Message déclencheur introuvable"},
+                created_at=datetime.now(timezone.utc)
+            )
+        
+        trigger_message = context_data.trigger_message
+        args = tool_call.arguments
+        
+        # Vérifier la limite de tâches par utilisateur (max 10 en attente)
+        pending_count = self.scheduler.count_pending_user_tasks(trigger_message.author.id)
+        if pending_count >= 10:
+            return ToolResponseRecord(
+                tool_call_id=tool_call.id,
+                response_data={'error': f"Limite atteinte : {pending_count}/10 tâches en attente. Annulez-en avant d'en créer d'autres."},
+                created_at=datetime.now(timezone.utc)
+            )
+        
+        # Extraire les paramètres avec validation
+        task_description = args.get('task_description', '').strip()
+        delay_minutes = args.get('delay_minutes', 0)
+        delay_hours = args.get('delay_hours', 0)
+        
+        # Validation : Description non vide
+        if not task_description:
+            return ToolResponseRecord(
+                tool_call_id=tool_call.id,
+                response_data={'error': "Description de tâche manquante"},
+                created_at=datetime.now(timezone.utc)
+            )
+        
+        # Validation : Description pas trop longue (max 500 caractères)
+        if len(task_description) > 500:
+            return ToolResponseRecord(
+                tool_call_id=tool_call.id,
+                response_data={'error': "Description trop longue (max 500 caractères)"},
+                created_at=datetime.now(timezone.utc)
+            )
+        
+        # Calculer le délai total
+        total_minutes = delay_minutes + (delay_hours * 60)
+        
+        # Validation : Délai minimum 2 minutes (pour éviter les conflits avec le message en cours)
+        if total_minutes < 2:
+            return ToolResponseRecord(
+                tool_call_id=tool_call.id,
+                response_data={'error': "Délai minimum : 2 minutes"},
+                created_at=datetime.now(timezone.utc)
+            )
+        
+        # Validation : Délai max 30 jours (empêcher l'abus)
+        if total_minutes > 43200:  # 30 jours = 43200 minutes
+            return ToolResponseRecord(
+                tool_call_id=tool_call.id,
+                response_data={'error': "Délai maximum : 30 jours"},
+                created_at=datetime.now(timezone.utc)
+            )
+        
+        # Calculer la date d'exécution
+        execute_at = datetime.now(timezone.utc) + timedelta(minutes=total_minutes)
+        
+        # Enregistrer la tâche via le scheduler (avec message_id pour reply)
+        logger.debug(f"Enregistrement tâche: {task_description} dans {total_minutes}m")
+        task_id = self.scheduler.schedule_task(
+            channel_id=trigger_message.channel.id,
+            user_id=trigger_message.author.id,
+            task_description=task_description,
+            execute_at=execute_at,
+            message_id=trigger_message.id
+        )
+        logger.debug(f"Tâche #{task_id} enregistrée avec succès")
+        
+        # Formatter le délai pour l'affichage
+        if delay_hours > 0 and delay_minutes == 0:
+            delay_text = f"{delay_hours}h"
+        elif delay_hours > 0:
+            delay_text = f"{delay_hours}h{delay_minutes}m"
+        else:
+            delay_text = f"{delay_minutes}m"
+        
+        # Convertir en heure de Paris pour l'affichage
+        execute_at_paris = execute_at.astimezone(PARIS_TZ)
+        execute_time = execute_at_paris.strftime("%H:%M")
+        
+        return ToolResponseRecord(
+            tool_call_id=tool_call.id,
+            response_data={
+                'success': True,
+                'task_id': task_id,
+                'execute_at': execute_at.isoformat(),
+                'delay': delay_text
+            },
+            created_at=datetime.now(timezone.utc),
+            metadata={'header': f"Tâche programmée dans {delay_text} (vers {execute_time})"}
+        )
+    
+    async def _tool_cancel_scheduled_task(self, tool_call: ToolCallRecord, context_data) -> ToolResponseRecord:
+        """Annule une tâche planifiée précédemment."""
+        if not context_data or not hasattr(context_data, 'trigger_message') or not context_data.trigger_message:
+            return ToolResponseRecord(
+                tool_call_id=tool_call.id,
+                response_data={'error': "Message déclencheur introuvable"},
+                created_at=datetime.now(timezone.utc)
+            )
+        
+        trigger_message = context_data.trigger_message
+        args = tool_call.arguments
+        
+        task_id = args.get('task_id')
+        if not task_id:
+            return ToolResponseRecord(
+                tool_call_id=tool_call.id,
+                response_data={'error': "ID de tâche manquant"},
+                created_at=datetime.now(timezone.utc)
+            )
+        
+        # Annuler uniquement si la tâche appartient à l'utilisateur
+        success = self.scheduler.cancel_task(task_id, user_id=trigger_message.author.id)
+        
+        if success:
+            return ToolResponseRecord(
+                tool_call_id=tool_call.id,
+                response_data={'success': True, 'task_id': task_id},
+                created_at=datetime.now(timezone.utc),
+                metadata={'header': f"Tâche #{task_id} annulée"}
+            )
+        else:
+            return ToolResponseRecord(
+                tool_call_id=tool_call.id,
+                response_data={'error': f"Tâche #{task_id} introuvable ou déjà terminée"},
+                created_at=datetime.now(timezone.utc)
+            )
     
     async def _tool_update_user_profile(self, tool_call: ToolCallRecord, context_data) -> ToolResponseRecord:
         """Met à jour le profil de l'auteur du message avec les infos récentes.
@@ -709,6 +1151,18 @@ class Chat(commands.Cog):
         # Puis sauvegarder la config
         self.set_guild_config(interaction.guild, 'chatbot_mode', mode)
     
+    @app_commands.command(name='tasks')
+    async def tasks_cmd(self, interaction: Interaction):
+        """Affiche et gérez vos tâches planifiées."""
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        
+        # Récupérer les tâches de l'utilisateur
+        tasks = self.scheduler.get_user_tasks(interaction.user.id, limit=20)
+        
+        # Créer la vue interactive
+        view = UserTasksView(tasks, interaction.user, self.scheduler)
+        await interaction.followup.send(view=view, ephemeral=True)
+    
     @app_commands.command(name='memory')
     async def memory(self, interaction: Interaction):
         """Affiche et modifie votre profil enregistré par MARIA."""
@@ -720,6 +1174,30 @@ class Chat(commands.Cog):
         await interaction.response.send_modal(modal)
     
     # COMMANDES ADMIN (prefix commands) ------------------------------
+    
+    @commands.command(name='tasks')
+    @commands.is_owner()
+    async def cmd_tasks(self, ctx: commands.Context):
+        """[Admin] Liste toutes les tâches planifiées."""
+        tasks = self.scheduler.get_all_tasks(limit=20)
+        
+        if not tasks:
+            await ctx.send("Aucune tâche planifiée.")
+            return
+        
+        # Créer la vue LayoutView
+        view = TasksListView(tasks, self.bot)
+        await ctx.send(view=view)
+    
+    @commands.command(name='canceltask')
+    @commands.is_owner()
+    async def cmd_cancel_task(self, ctx: commands.Context, task_id: int):
+        """[Admin] Annule une tâche planifiée."""
+        success = self.scheduler.cancel_task(task_id)
+        if success:
+            await ctx.send(f"Tâche #{task_id} annulée.")
+        else:
+            await ctx.send(f"Tâche #{task_id} introuvable ou déjà terminée.")
     
     @commands.command(name='profiles')
     @commands.is_owner()

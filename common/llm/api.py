@@ -71,7 +71,7 @@ class MariaGptApi:
                  transcription_model: str = 'gpt-4o-transcribe',
                  max_completion_tokens: int = 1000,
                  context_window: int = 512 * 32,
-                 context_age_hours: int = 6,
+                 context_age_hours: int = 2,
                  on_completion: Optional[Callable] = None):
         """Initialise l'API GPT.
         
@@ -178,6 +178,59 @@ class MariaGptApi:
         )
         
         logger.info(f"Complétion terminée pour salon {channel.id}")
+        return response
+    
+    async def run_autonomous_task(self,
+                                  channel: discord.abc.Messageable,
+                                  user_name: str,
+                                  user_id: int,
+                                  task_prompt: str) -> MariaResponse:
+        """Exécute une tâche autonome sans message Discord déclencheur.
+        
+        Utilisé pour les tâches planifiées, rappels, etc.
+        Injecte directement du texte dans le contexte comme si c'était un message utilisateur.
+        
+        Args:
+            channel: Salon Discord où exécuter la tâche
+            user_name: Nom de l'utilisateur concerné
+            user_id: ID de l'utilisateur concerné
+            task_prompt: Prompt de la tâche à exécuter
+            
+        Returns:
+            MariaResponse avec le texte et les métadonnées
+        """
+        session = self.session_manager.get_or_create_session(channel)
+        
+        # Exécution avec prompt direct (thread-safe via lock interne)
+        assistant_record = await session.run_autonomous_task(
+            user_name=user_name,
+            user_id=user_id,
+            task_prompt=task_prompt
+        )
+        
+        # Extraction des tool responses du contexte
+        tool_responses = []
+        messages = session.context.get_messages()
+        
+        # Chercher les tool responses après le dernier assistant
+        found_assistant = False
+        for msg in reversed(messages):
+            if msg == assistant_record:
+                found_assistant = True
+                continue
+            if found_assistant and msg.role == 'tool':
+                tool_responses.insert(0, msg)
+            elif found_assistant and msg.role != 'tool':
+                break
+        
+        # Construire la réponse
+        response = MariaResponse(
+            text=assistant_record.full_text,
+            assistant_record=assistant_record,
+            tool_responses=tool_responses
+        )
+        
+        logger.info(f"Tâche autonome terminée pour salon {channel.id}")
         return response
     
     async def forget(self, channel: discord.abc.Messageable) -> None:

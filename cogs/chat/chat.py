@@ -684,12 +684,21 @@ IMPORTANT: Ceci est une tâche autonome que tu as programmée. L'utilisateur n'e
         logger.debug(f"Tâche #{task_id} enregistrée avec succès")
         
         # Formatter le délai pour l'affichage
-        if delay_hours > 0 and delay_minutes == 0:
-            delay_text = f"{delay_hours}h"
-        elif delay_hours > 0:
-            delay_text = f"{delay_hours}h{delay_minutes}m"
-        else:
-            delay_text = f"{delay_minutes}m"
+        def _format_delay_text(total_min: int) -> str:
+            days, rem_minutes = divmod(total_min, 1440)
+            hours, minutes = divmod(rem_minutes, 60)
+            parts = []
+            if days:
+                parts.append(f"{days} j")
+            if hours:
+                parts.append(f"{hours} h")
+            if minutes:
+                parts.append(f"{minutes} min")
+            if not parts:
+                return "moins d'une minute"
+            return " ".join(parts)
+
+        delay_text = _format_delay_text(total_minutes)
         
         # Convertir en heure de Paris pour l'affichage
         execute_at_paris = execute_at.astimezone(PARIS_TZ)

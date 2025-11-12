@@ -560,7 +560,8 @@ IMPORTANT :
 - Ne pose AUCUNE question subsidiaire (personne ne répondra)
 - Fais de ton mieux avec les informations dont tu disposes
 - Utilise tes outils (recherche web, etc.) si nécessaire
-- Donne un compte rendu clair de ce que tu as fait ou trouvé
+- Réponds comme si tu t'adressais directement à la personne concernée
+- Ne rajoute pas de compte rendu ou de résumé administratif en fin de message
 - Si tu ne peux pas tout faire, explique précisément ce que tu as réussi à accomplir"""
         
         # Exécuter via l'API propre (sans fake message et sans typing)

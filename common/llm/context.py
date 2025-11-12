@@ -278,15 +278,49 @@ class ConversationContext:
         # 2. Supprimer les messages dépassant la fenêtre de tokens
         # On garde les plus récents en priorité
         total_tokens = 0
-        valid_messages = []
+        valid_messages: list[MessageRecord] = []
         
         for message in reversed(self._messages):
             msg_tokens = message.token_count
-            if total_tokens + msg_tokens <= self.context_window:
+            
+            # Cas limite : conserver au moins le message le plus récent,
+            # même s'il dépasse la fenêtre de tokens.
+            if not valid_messages and (self.context_window <= 0 or msg_tokens >= self.context_window):
+                valid_messages.insert(0, message)
+                total_tokens = min(msg_tokens, self.context_window) if self.context_window > 0 else msg_tokens
+                continue
+            
+            if self.context_window <= 0 or total_tokens + msg_tokens <= self.context_window:
                 valid_messages.insert(0, message)
                 total_tokens += msg_tokens
             else:
-                break
+                # on continue pour supprimer les messages les plus anciens
+                continue
+        
+        # Nettoyage : supprimer les réponses d'outil orphelines si l'assistant associé n'est plus présent
+        cleaned_messages: list[MessageRecord] = []
+        active_tool_calls: set[str] = set()
+        
+        for message in valid_messages:
+            if message.role == 'assistant' and isinstance(message, AssistantRecord):
+                if message.tool_calls:
+                    active_tool_calls.update(tc.id for tc in message.tool_calls)
+                cleaned_messages.append(message)
+                continue
+            
+            if message.role == 'tool' and isinstance(message, ToolResponseRecord):
+                tool_id = message.tool_call_id
+                if tool_id in active_tool_calls:
+                    cleaned_messages.append(message)
+                    active_tool_calls.discard(tool_id)
+                else:
+                    # réponse d'outil sans assistant correspondant : on ignore
+                    continue
+                continue
+            
+            cleaned_messages.append(message)
+        
+        valid_messages = cleaned_messages
         
         removed_count = len(self._messages) - len(valid_messages)
         self._messages = valid_messages

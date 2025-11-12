@@ -308,14 +308,9 @@ class ChannelSession:
                     )
 
                 elif message.role == 'tool' and isinstance(message, ToolResponseRecord):
-                    metadata = dict(message.metadata)
-                    metadata['autonomous_task'] = True
-                    metadata['task_owner_id'] = user_id
-                    self.context.add_tool_response(
-                        tool_call_id=message.tool_call_id,
-                        response_data=copy.deepcopy(message.response_data),
-                        **metadata
-                    )
+                    # Ne pas réinjecter les réponses d'outils des tâches autonomes
+                    # pour éviter de polluer le contexte principal avec du JSON.
+                    continue
 
             if assistant_record is None:
                 # Sécurité : ne jamais retourner None

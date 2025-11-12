@@ -2,6 +2,7 @@
 Chatbot principal utilisant la nouvelle API GPT."""
 
 import asyncio
+import json
 import logging
 import re
 import zoneinfo
@@ -14,7 +15,7 @@ from discord import Interaction, app_commands, ui
 from discord.ext import commands
 
 from common import dataio
-from common.llm import MariaGptApi, Tool, ToolCallRecord, ToolResponseRecord
+from common.llm import MariaGptApi, Tool, ToolCallRecord, ToolResponseRecord, AssistantRecord
 from common.memory import MemoryManager
 from .scheduler import TaskScheduler, ScheduledTask
 
@@ -1211,6 +1212,63 @@ IMPORTANT :
         # Créer la vue LayoutView
         view = TasksListView(tasks, self.bot)
         await ctx.send(view=view)
+
+    @commands.command(name='contextpeek')
+    @commands.is_owner()
+    async def cmd_contextpeek(self, ctx: commands.Context, limit: int = 15):
+        """[Admin] Affiche un extrait des derniers messages en contexte pour ce salon."""
+        limit = max(1, min(limit, 50))
+        
+        session = self.gpt_api.session_manager.get_session(ctx.channel.id)
+        if not session:
+            await ctx.send("Aucun historique enregistré pour ce salon.")
+            return
+        
+        messages = session.context.get_recent_messages(limit)
+        if not messages:
+            await ctx.send("Historique vide pour ce salon.")
+            return
+        
+        entries = []
+        for msg in messages:
+            created = msg.created_at.astimezone(PARIS_TZ).strftime("%d/%m %H:%M:%S")
+            role = msg.role.upper()
+            
+            flags = []
+            if msg.metadata.get('autonomous_task'):
+                flags.append("auto")
+            
+            if isinstance(msg, AssistantRecord) and msg.tool_calls:
+                flags.append("tools=" + ','.join(tc.function_name for tc in msg.tool_calls))
+            
+            header = f"[{created}] {role}"
+            if flags:
+                header += " (" + ", ".join(flags) + ")"
+            
+            if msg.role == 'tool' and isinstance(msg, ToolResponseRecord):
+                preview = json.dumps(msg.response_data, ensure_ascii=False)
+            else:
+                preview = msg.full_text.strip()
+            
+            preview = re.sub(r"\s+", " ", preview) or "[contenu vide]"
+            if len(preview) > 200:
+                preview = preview[:197] + "…"
+            
+            entries.append(f"{header}\n→ {preview}")
+        
+        blocks = []
+        current = ""
+        for entry in entries:
+            addition = entry + "\n\n"
+            if len(current) + len(addition) > 1900:
+                blocks.append(current.rstrip())
+                current = ""
+            current += addition
+        if current.strip():
+            blocks.append(current.rstrip())
+        
+        for block in blocks:
+            await ctx.send(f"```\n{block}\n```")
     
     @commands.command(name='canceltask')
     @commands.is_owner()

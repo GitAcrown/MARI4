@@ -22,9 +22,12 @@ logger = logging.getLogger(f'MARI4.{__name__.split(".")[-1]}')
 # CONSTANTES ------------------------------------------------------
 
 DEFAULT_CHUNK_SIZE = 2000
-DEFAULT_NUM_RESULTS = 5 
-DEFAULT_TIMEOUT = 20
+DEFAULT_NUM_RESULTS = 4
+DEFAULT_TIMEOUT = 15
 CACHE_EXPIRY_HOURS = 12
+SEARCH_CACHE_EXPIRY_SECONDS = 300
+REQUEST_TIMEOUT = (5, 12)  # (connect, read)
+MAX_REDIRECTS = 5
 
 # Headers pour éviter les blocages
 DEFAULT_HEADERS = {
@@ -62,6 +65,7 @@ class Web(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.page_chunks_cache: Dict[str, Dict] = {}
+        self.search_cache: Dict[str, Dict] = {}
         
         # Outils globaux exportés
         self.GLOBAL_TOOLS = [
@@ -144,6 +148,12 @@ class Web(commands.Cog):
     
     def search_web_pages(self, query: str, lang: str = 'fr', num_results: int = DEFAULT_NUM_RESULTS) -> List[Dict]:
         """Effectue une recherche web avec DDGS."""
+        cache_key = f"{lang}:{query.strip().lower()}"
+        cache_entry = self.search_cache.get(cache_key)
+        now = time.time()
+        if cache_entry and now - cache_entry['timestamp'] < SEARCH_CACHE_EXPIRY_SECONDS:
+            return cache_entry['results'][:num_results]
+        
         try:
             with DDGS() as ddgs:
                 results = ddgs.text(
@@ -151,7 +161,7 @@ class Web(commands.Cog):
                     region=f'{lang}-{lang}',
                     max_results=min(num_results, 10)
                 )
-                return [
+                parsed_results = [
                     {
                         'title': r.get('title', ''),
                         'url': r.get('href', ''),
@@ -159,6 +169,11 @@ class Web(commands.Cog):
                     }
                     for r in results
                 ]
+                self.search_cache[cache_key] = {
+                    'results': parsed_results,
+                    'timestamp': now
+                }
+                return parsed_results
         except Exception as e:
             logger.error(f"Erreur recherche web: {e}")
             return []
@@ -174,19 +189,28 @@ class Web(commands.Cog):
         
         try:
             # Récupération de la page
-            response = requests.get(url, headers=DEFAULT_HEADERS, timeout=DEFAULT_TIMEOUT)
+            session = requests.Session()
+            session.max_redirects = MAX_REDIRECTS
+            response = session.get(
+                url,
+                headers=DEFAULT_HEADERS,
+                timeout=REQUEST_TIMEOUT,
+                allow_redirects=True
+            )
             if response.status_code != 200:
                 return []
             
             soup = BeautifulSoup(response.text, "html.parser")
             
             # Suppression des éléments non pertinents
-            for tag in soup(["script", "style", "header", "footer", "nav", "aside", "iframe", 
-                            "noscript", "form", "button", "svg", ".ad", ".ads", ".cookie", 
-                            ".popup", ".banner", ".sidebar", ".menu", ".comments", "select",
-                            "input", "textarea", "label", ".navigation", ".breadcrumb", 
-                            ".social", ".share", ".related", ".recommended", ".widget"]):
+            for tag in soup.find_all(["script", "style", "header", "footer", "nav", "aside", "iframe",
+                                      "noscript", "form", "button", "svg", "select", "input", "textarea", "label"]):
                 tag.decompose()
+            for selector in [".ad", ".ads", ".cookie", ".popup", ".banner", ".sidebar", ".menu",
+                             ".comments", ".navigation", ".breadcrumb", ".social", ".share",
+                             ".related", ".recommended", ".widget"]:
+                for element in soup.select(selector):
+                    element.decompose()
             
             # Détection du contenu principal
             main_content = None
@@ -258,7 +282,7 @@ class Web(commands.Cog):
             )
         
         # Recherche
-        results = self.search_web_pages(query, lang, 5)
+        results = self.search_web_pages(query, lang, DEFAULT_NUM_RESULTS)
         
         if not results:
             return ToolResponseRecord(
@@ -268,10 +292,21 @@ class Web(commands.Cog):
             )
         
         # Construire la réponse avec les résultats enrichis
+        pruned_results = []
+        seen_urls = set()
+        for item in results:
+            url = item.get('url', '')
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            pruned_results.append(item)
+            if len(pruned_results) >= DEFAULT_NUM_RESULTS:
+                break
+        
         response_data = {
             'query': query,
-            'results': results,
-            'total': len(results),
+            'results': pruned_results,
+            'total': len(pruned_results),
             'note': 'Si les extraits sont insuffisants, utilise read_web_page sur une URL specifique pour plus de details.'
         }
         

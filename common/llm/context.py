@@ -299,23 +299,21 @@ class ConversationContext:
         
         # Nettoyage : supprimer les réponses d'outil orphelines si l'assistant associé n'est plus présent
         cleaned_messages: list[MessageRecord] = []
-        assistant_tool_map: dict[MessageRecord, set[str]] = {}
+        assistant_tool_map: list[tuple[AssistantRecord, set[str]]] = []
         resolved_tool_ids: set[str] = set()
         
         for message in valid_messages:
             if message.role == 'assistant' and isinstance(message, AssistantRecord):
                 if message.tool_calls:
-                    assistant_tool_map[message] = {tc.id for tc in message.tool_calls}
+                    assistant_tool_map.append((message, {tc.id for tc in message.tool_calls}))
                 cleaned_messages.append(message)
                 continue
             
             if message.role == 'tool' and isinstance(message, ToolResponseRecord):
                 tool_id = message.tool_call_id
-                # Garder uniquement les réponses correspondant à un assistant présent
-                if any(tool_id in ids for ids in assistant_tool_map.values()):
+                if any(tool_id in ids for _, ids in assistant_tool_map):
                     cleaned_messages.append(message)
                     resolved_tool_ids.add(tool_id)
-                # Sinon, ignorer la réponse orpheline
                 continue
             
             cleaned_messages.append(message)
@@ -325,13 +323,14 @@ class ConversationContext:
             final_messages: list[MessageRecord] = []
             
             for message in cleaned_messages:
-                if message.role == 'assistant' and message in assistant_tool_map:
-                    expected_ids = assistant_tool_map[message]
-                    if expected_ids.issubset(resolved_tool_ids):
-                        final_messages.append(message)
-                    else:
-                        skip_tool_ids.update(expected_ids)
-                    continue
+                if message.role == 'assistant':
+                    match = next((ids for assistant, ids in assistant_tool_map if assistant is message), None)
+                    if match:
+                        if match.issubset(resolved_tool_ids):
+                            final_messages.append(message)
+                        else:
+                            skip_tool_ids.update(match)
+                        continue
                 
                 if message.role == 'tool' and isinstance(message, ToolResponseRecord):
                     if message.tool_call_id in skip_tool_ids:

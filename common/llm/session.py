@@ -161,14 +161,31 @@ class ChannelSession:
         # Références
         if message.reference and message.reference.resolved:
             ref_msg = message.reference.resolved
-            # Si référence au bot
-            if ref_msg.author.bot:  # Approximation, devrait vérifier l'ID exact
-                start = ref_msg.content[:200].replace('\n', ' ')
-                if len(ref_msg.content) > 200:
-                    start += '...'
-                components.append(MetadataComponent('REFERENCE', yourself=True, starting_with=start))
+            # Extraire le contenu du message référencé
+            ref_content = ref_msg.content or ""
+            if ref_msg.embeds:
+                # Si le message n'a pas de contenu mais a des embeds, utiliser la description
+                for embed in ref_msg.embeds:
+                    if embed.description:
+                        ref_content = embed.description
+                        break
+            
+            # Limiter la longueur pour éviter de surcharger le contexte
+            if len(ref_content) > 300:
+                ref_preview = ref_content[:300].replace('\n', ' ') + '...'
             else:
-                components.append(MetadataComponent('REFERENCE', message_id=ref_msg.id))
+                ref_preview = ref_content.replace('\n', ' ') if ref_content else "(message sans texte)"
+            
+            # Si référence au bot
+            if ref_msg.author.bot:
+                components.append(MetadataComponent('REFERENCE', yourself=True, starting_with=ref_preview))
+            else:
+                # Référence à un autre utilisateur : inclure auteur et contenu
+                author_name = ref_msg.author.name
+                components.append(MetadataComponent('REFERENCE', 
+                                                   author=author_name,
+                                                   message_id=ref_msg.id,
+                                                   content=ref_preview))
         
         # Créer le record
         record = self.context.add_user_message(

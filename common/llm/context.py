@@ -56,10 +56,24 @@ class ImageComponent(ContentComponent):
 class MetadataComponent(ContentComponent):
     """Composant de métadonnées (affiché comme texte)."""
     def __init__(self, title: str, **metadata):
-        text = f'<{title.upper()}'
-        if metadata:
-            text += ' ' + ' '.join([f'{k.lower()}={v}' for k, v in metadata.items()])
-        text += '>'
+        # Format spécial pour REFERENCE pour plus de clarté
+        if title.upper() == 'REFERENCE':
+            if metadata.get('yourself'):
+                # Référence à un message du bot
+                content = metadata.get('starting_with', '')
+                text = f"[RÉFÉRENCE à ton message précédent: {content}]"
+            else:
+                # Référence à un message d'un autre utilisateur
+                author = metadata.get('author', 'utilisateur')
+                content = metadata.get('content', '')
+                text = f"[RÉFÉRENCE au message de {author}: {content}]"
+        else:
+            # Format générique pour les autres métadonnées
+            text = f'<{title.upper()}'
+            if metadata:
+                text += ' ' + ' '.join([f'{k.lower()}={v}' for k, v in metadata.items()])
+            text += '>'
+        
         data = {'type': 'text', 'text': text}
         token_count = len(GPT_TOKENIZER.encode(text))
         super().__init__(type='text', data=data, token_count=token_count)

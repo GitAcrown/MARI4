@@ -17,6 +17,19 @@ from ddgs import DDGS
 
 from common.llm import Tool, ToolCallRecord, ToolResponseRecord
 
+# Imports optionnels pour extraction avancée
+try:
+    from readability import Document
+    READABILITY_AVAILABLE = True
+except ImportError:
+    READABILITY_AVAILABLE = False
+
+try:
+    import trafilatura
+    TRAFILATURA_AVAILABLE = True
+except ImportError:
+    TRAFILATURA_AVAILABLE = False
+
 logger = logging.getLogger(f'MARI4.{__name__.split(".")[-1]}')
 
 # CONSTANTES ------------------------------------------------------
@@ -53,10 +66,18 @@ NOISE_PATTERNS = [
     r'var\s+\w+\s*=.*?;',
 ]
 
-# Sélecteurs pour détecter le contenu principal
+# Sélecteurs pour détecter le contenu principal (ordre de priorité)
 MAIN_CONTENT_SELECTORS = [
-    'main', 'article', '.content', '.post', '.post-content', '.entry-content',
-    '#content', '#main', '.article', '[role="main"]'
+    'main', 'article', '[role="main"]',
+    '.content', '.post', '.post-content', '.entry-content', '.article-content',
+    '#content', '#main', '.article', '.entry', '.post-body',
+    '.story-body', '.article-body', '.text-content', '.main-content'
+]
+
+# Sélecteurs supplémentaires pour sites spécifiques
+ADDITIONAL_SELECTORS = [
+    '.story', '.news-content', '.editorial', '.blog-post',
+    '.post-text', '.article-text', '.body-text'
 ]
 
 class Web(commands.Cog):
@@ -87,8 +108,6 @@ class Web(commands.Cog):
                 function=self._tool_read_web_page
             )
         ]
-        
-        logger.info("Web cog initialisé avec 2 outils")
     
     # MÉTHODES UTILITAIRES --------------------------------------------
     
@@ -178,8 +197,113 @@ class Web(commands.Cog):
             logger.error(f"Erreur recherche web: {e}")
             return []
     
+    def _extract_with_trafilatura(self, html_content: str, url: str) -> str:
+        """Extraction avec trafilatura (meilleure qualité)."""
+        if not TRAFILATURA_AVAILABLE:
+            return None
+        
+        try:
+            extracted = trafilatura.extract(
+                html_content,
+                url=url,
+                include_comments=False,
+                include_tables=False,
+                include_images=False,
+                include_links=False,
+                favor_recall=True  # Priorité au contenu complet
+            )
+            if extracted and len(extracted.strip()) > 200:
+                return extracted
+        except Exception as e:
+            logger.debug(f"Trafilatura échoué: {e}")
+        return None
+    
+    def _extract_with_readability(self, html_content: str) -> tuple:
+        """Extraction avec readability-lxml."""
+        if not READABILITY_AVAILABLE:
+            return None, None
+        
+        try:
+            doc = Document(html_content)
+            content_html = doc.summary()
+            title = doc.title()
+            
+            if content_html:
+                soup = BeautifulSoup(content_html, "html.parser")
+                text = soup.get_text(separator='\n', strip=True)
+                if len(text.strip()) > 200:
+                    return text, title
+        except Exception as e:
+            logger.debug(f"Readability échoué: {e}")
+        return None, None
+    
+    def _extract_with_bs4_advanced(self, soup: BeautifulSoup) -> str:
+        """Extraction avancée avec BeautifulSoup (fallback amélioré)."""
+        # Suppression des éléments non pertinents
+        for tag in soup.find_all(["script", "style", "header", "footer", "nav", "aside", "iframe",
+                                  "noscript", "form", "button", "svg", "select", "input", "textarea", 
+                                  "label", "meta", "link", "base"]):
+            tag.decompose()
+        
+        # Suppression des classes/id de bruit
+        noise_selectors = [
+            ".ad", ".ads", ".advertisement", ".cookie", ".popup", ".banner", 
+            ".sidebar", ".menu", ".comments", ".navigation", ".breadcrumb", 
+            ".social", ".share", ".related", ".recommended", ".widget",
+            ".newsletter", ".subscribe", ".footer", ".header", ".cookie-banner",
+            "#cookie", "#ad", "#ads", ".modal", ".overlay"
+        ]
+        for selector in noise_selectors:
+            for element in soup.select(selector):
+                element.decompose()
+        
+        # Détection du contenu principal (ordre de priorité)
+        main_content = None
+        for selector in MAIN_CONTENT_SELECTORS + ADDITIONAL_SELECTORS:
+            content = soup.select_one(selector)
+            if content and len(content.get_text(strip=True)) > 200:
+                main_content = content
+                break
+        
+        # Si pas trouvé, chercher le plus gros bloc de texte
+        if not main_content:
+            body = soup.find('body') or soup
+            candidates = body.find_all(['div', 'section', 'article'], recursive=True)
+            best_candidate = None
+            best_length = 0
+            
+            for candidate in candidates:
+                text_length = len(candidate.get_text(strip=True))
+                # Éviter les éléments trop petits ou trop grands (probablement la page entière)
+                if 200 < text_length < 50000 and text_length > best_length:
+                    # Vérifier qu'il contient des paragraphes
+                    if candidate.find_all(['p', 'h1', 'h2', 'h3'], limit=3):
+                        best_candidate = candidate
+                        best_length = text_length
+            
+            if best_candidate:
+                main_content = best_candidate
+        
+        text_container = main_content or soup.find('body') or soup
+        
+        # Extraction du texte avec structure
+        text = ""
+        for elem in text_container.find_all(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'blockquote']):
+            content = elem.get_text(strip=True)
+            if len(content) > 10:
+                if elem.name.startswith('h'):
+                    level = int(elem.name[1]) if len(elem.name) > 1 else 1
+                    prefix = "#" * (level + 1) + " "
+                elif elem.name == 'blockquote':
+                    prefix = "> "
+                else:
+                    prefix = ""
+                text += f"\n{prefix}{content}\n"
+        
+        return text
+    
     def fetch_page_chunks(self, url: str, chunk_size: int = DEFAULT_CHUNK_SIZE) -> List[str]:
-        """Récupère et divise le contenu d'une page web."""
+        """Récupère et divise le contenu d'une page web avec plusieurs stratégies de fallback."""
         # Vérifier le cache
         cache_key = f"{url}_{chunk_size}"
         if cache_key in self.page_chunks_cache:
@@ -187,85 +311,128 @@ class Web(commands.Cog):
             if time.time() - cache_entry['timestamp'] < CACHE_EXPIRY_HOURS * 3600:
                 return cache_entry['chunks']
         
+        html_content = None
+        response = None
+        
         try:
-            # Récupération de la page
+            # Récupération de la page avec retry
             session = requests.Session()
             session.max_redirects = MAX_REDIRECTS
-            response = session.get(
-                url,
-                headers=DEFAULT_HEADERS,
-                timeout=REQUEST_TIMEOUT,
-                allow_redirects=True
-            )
-            if response.status_code != 200:
+            
+            # Essayer avec différents headers si échec
+            headers_list = [
+                DEFAULT_HEADERS,
+                {
+                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1'
+                }
+            ]
+            
+            for headers in headers_list:
+                try:
+                    response = session.get(
+                        url,
+                        headers=headers,
+                        timeout=REQUEST_TIMEOUT,
+                        allow_redirects=True
+                    )
+                    if response.status_code == 200:
+                        html_content = response.text
+                        break
+                    elif response.status_code == 403:
+                        logger.warning(f"Accès refusé (403) pour {url}, essai avec headers alternatifs")
+                        continue
+                    elif response.status_code == 429:
+                        logger.warning(f"Trop de requêtes (429) pour {url}, attente...")
+                        time.sleep(2)
+                        continue
+                except requests.exceptions.Timeout:
+                    logger.warning(f"Timeout pour {url}, essai suivant...")
+                    continue
+                except requests.exceptions.RequestException as e:
+                    logger.warning(f"Erreur requête pour {url}: {e}")
+                    continue
+            
+            if not html_content or response.status_code != 200:
+                error_msg = f"Impossible de récupérer la page (status: {response.status_code if response else 'N/A'})"
+                if response and response.status_code == 403:
+                    error_msg += ". Le site bloque peut-être les robots. Essayez une autre source."
+                elif response and response.status_code == 429:
+                    error_msg += ". Trop de requêtes. Réessayez plus tard."
                 return []
             
-            soup = BeautifulSoup(response.text, "html.parser")
+            # Stratégie 1: Trafilatura (meilleure qualité)
+            text = self._extract_with_trafilatura(html_content, url)
+            if text and len(text.strip()) > 200:
+                text = self.clean_text_content(text)
+                chunks = self._split_into_chunks(text, chunk_size)
+                if chunks:
+                    self.page_chunks_cache[cache_key] = {
+                        'chunks': chunks,
+                        'timestamp': time.time()
+                    }
+                    return chunks
             
-            # Suppression des éléments non pertinents
-            for tag in soup.find_all(["script", "style", "header", "footer", "nav", "aside", "iframe",
-                                      "noscript", "form", "button", "svg", "select", "input", "textarea", "label"]):
-                tag.decompose()
-            for selector in [".ad", ".ads", ".cookie", ".popup", ".banner", ".sidebar", ".menu",
-                             ".comments", ".navigation", ".breadcrumb", ".social", ".share",
-                             ".related", ".recommended", ".widget"]:
-                for element in soup.select(selector):
-                    element.decompose()
+            # Stratégie 2: Readability
+            text, title = self._extract_with_readability(html_content)
+            if text and len(text.strip()) > 200:
+                text = self.clean_text_content(text)
+                chunks = self._split_into_chunks(text, chunk_size)
+                if chunks:
+                    self.page_chunks_cache[cache_key] = {
+                        'chunks': chunks,
+                        'timestamp': time.time()
+                    }
+                    return chunks
             
-            # Détection du contenu principal
-            main_content = None
-            for selector in MAIN_CONTENT_SELECTORS:
-                content = soup.select(selector)
-                if content and len(str(content[0])) > 500:
-                    main_content = content[0]
-                    break
+            # Stratégie 3: BeautifulSoup avancé (fallback)
+            soup = BeautifulSoup(html_content, "html.parser")
+            text = self._extract_with_bs4_advanced(soup)
+            if text and len(text.strip()) > 200:
+                text = self.clean_text_content(text)
+                chunks = self._split_into_chunks(text, chunk_size)
+                if chunks:
+                    self.page_chunks_cache[cache_key] = {
+                        'chunks': chunks,
+                        'timestamp': time.time()
+                    }
+                    return chunks
             
-            text_container = main_content or soup.find('body') or soup
-            
-            # Extraction du texte
-            text = ""
-            for elem in text_container.find_all(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li']):
-                content = elem.get_text(strip=True)
-                if len(content) > 10:
-                    prefix = f"## " if elem.name.startswith('h') else ""
-                    text += f"\n{prefix}{content}\n"
-            
-            # Nettoyage
-            text = self.clean_text_content(text)
-            
-            # Division en chunks
-            chunks = []
-            paragraphs = [p for p in re.split(r'\n\n+', text) if p.strip()]
-            current_chunk = ""
-            
-            for paragraph in paragraphs:
-                if len(paragraph.strip()) < 30:
-                    continue
-                    
-                if len(current_chunk) + len(paragraph) + 2 > chunk_size:
-                    if current_chunk:
-                        chunks.append(current_chunk.strip())
-                    current_chunk = paragraph
-                else:
-                    current_chunk = f"{current_chunk}\n\n{paragraph}" if current_chunk else paragraph
-            
-            if current_chunk.strip():
-                chunks.append(current_chunk.strip())
-            
-            # Filtrer les chunks de qualité
-            chunks = [c for c in chunks if len(c.strip()) > 100 and not self._is_low_quality_chunk(c)]
-            
-            # Mise en cache
-            self.page_chunks_cache[cache_key] = {
-                'chunks': chunks, 
-                'timestamp': time.time()
-            }
-            
-            return chunks
+            # Si aucune stratégie n'a fonctionné
+            logger.warning(f"Aucune extraction réussie pour {url}")
+            return []
             
         except Exception as e:
             logger.error(f"Erreur lecture page {url}: {e}")
             return []
+    
+    def _split_into_chunks(self, text: str, chunk_size: int) -> List[str]:
+        """Divise le texte en chunks de qualité."""
+        chunks = []
+        paragraphs = [p for p in re.split(r'\n\n+', text) if p.strip()]
+        current_chunk = ""
+        
+        for paragraph in paragraphs:
+            if len(paragraph.strip()) < 30:
+                continue
+                
+            if len(current_chunk) + len(paragraph) + 2 > chunk_size:
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+                current_chunk = paragraph
+            else:
+                current_chunk = f"{current_chunk}\n\n{paragraph}" if current_chunk else paragraph
+        
+        if current_chunk.strip():
+            chunks.append(current_chunk.strip())
+        
+        # Filtrer les chunks de qualité
+        chunks = [c for c in chunks if len(c.strip()) > 100 and not self._is_low_quality_chunk(c)]
+        return chunks
     
     # OUTILS ----------------------------------------------------------
     
@@ -341,9 +508,17 @@ class Web(commands.Cog):
         chunks = self.fetch_page_chunks(url)
         
         if not chunks:
+            # Essayer de donner plus d'informations sur l'erreur
+            parsed = urlparse(url)
+            domain = parsed.netloc or url.split("//")[-1].split("/")[0]
+            
+            error_msg = f"Impossible de lire cette page ({domain})."
+            error_msg += " Raisons possibles : site bloquant les robots, contenu JavaScript uniquement,"
+            error_msg += " page protégée, ou erreur réseau. Essayez une autre source ou URL."
+            
             return ToolResponseRecord(
                 tool_call_id=tool_call.id,
-                response_data={'error': 'Impossible de lire cette page'},
+                response_data={'error': error_msg, 'url': url},
                 created_at=datetime.now(timezone.utc)
             )
         

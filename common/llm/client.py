@@ -66,7 +66,6 @@ class MariaLLMClient:
             'errors': 0
         }
         
-        logger.info(f"MariaLLMClient initialisé avec modèle {completion_model}")
     
     async def create_completion(self,
                                messages: list[dict],
@@ -176,5 +175,4 @@ class MariaLLMClient:
     async def close(self):
         """Ferme le client."""
         await self.client.close()
-        logger.info("MariaLLMClient fermé")
 

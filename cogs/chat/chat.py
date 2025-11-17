@@ -7,7 +7,7 @@ import logging
 import re
 import zoneinfo
 from datetime import datetime, timedelta, timezone
-from typing import Literal, Union
+from typing import Literal, Union, Optional
 from collections import deque
 
 import discord
@@ -56,6 +56,7 @@ RECHERCHE:
 • Utilise les outils de recherche web de manière PROACTIVE avant de répondre A TOUTE QUESTION dont il te manque des informations (ou si trop récentes/actuelles)
 • Utilise read_web_page dès que les extraits de la recherche web ne suffisent pas à répondre à la question
 • Adapte la langue de recherche à la demande
+• IMPORTANT: Une fois que tu as reçu les résultats d'un outil, UTILISE-LES pour répondre. Ne redemande pas la même recherche ou information que tu viens d'obtenir. Les résultats des outils sont dans les messages précédents de type 'tool' - lis-les attentivement avant de faire de nouveaux appels d'outils.
 
 FORMAT:
 Messages utilisateurs : "[id] username (user_id) : message"
@@ -429,13 +430,11 @@ class Chat(commands.Cog):
         # Messages déjà traités (éviter doublons)
         self._processed_messages = deque(maxlen=100)
         
-        logger.info("Chat cog initialisé avec API GPT")
     
     async def cog_load(self):
         """Appelé quand le cog est chargé."""
         # Démarrer le worker de tâches planifiées
         await self.scheduler.start_worker()
-        logger.info("Scheduler worker démarré")
     
     async def cog_unload(self):
         """Appelé quand le cog est déchargé."""
@@ -453,7 +452,6 @@ class Chat(commands.Cog):
                 continue
             if hasattr(cog, 'GLOBAL_TOOLS'):
                 tools.extend(cog.GLOBAL_TOOLS)
-                logger.info(f"Outils chargés depuis {cog.qualified_name}: {len(cog.GLOBAL_TOOLS)}")
         
         update_profile_tool = Tool(
             name='update_user_profile',
@@ -518,7 +516,6 @@ class Chat(commands.Cog):
         
         if tools:
             self.gpt_api.add_tools(*tools)
-            logger.info(f"Total outils enregistrés: {len(tools)}")
     
     # EXÉCUTEUR DE TÂCHES -----------------------------------------
     
@@ -625,7 +622,6 @@ IMPORTANT :
     
     async def _tool_schedule_task(self, tool_call: ToolCallRecord, context_data) -> ToolResponseRecord:
         """Programme une tâche à exécuter plus tard de manière autonome."""
-        logger.debug("_tool_schedule_task appelé")
         if not context_data or not hasattr(context_data, 'trigger_message') or not context_data.trigger_message:
             return ToolResponseRecord(
                 tool_call_id=tool_call.id,
@@ -689,7 +685,6 @@ IMPORTANT :
         execute_at = datetime.now(timezone.utc) + timedelta(minutes=total_minutes)
         
         # Enregistrer la tâche via le scheduler (avec message_id pour reply)
-        logger.debug(f"Enregistrement tâche: {task_description} dans {total_minutes}m")
         task_id = self.scheduler.schedule_task(
             channel_id=trigger_message.channel.id,
             user_id=trigger_message.author.id,
@@ -697,7 +692,6 @@ IMPORTANT :
             execute_at=execute_at,
             message_id=trigger_message.id
         )
-        logger.debug(f"Tâche #{task_id} enregistrée avec succès")
         
         # Formatter le délai pour l'affichage
         def _format_delay_text(total_min: int) -> str:
@@ -801,7 +795,6 @@ IMPORTANT :
         success = await self.memory.force_update(user_id, recent_messages)
         new_content = self.memory.get_profile_text(user_id)
         if success:
-            logger.info(f"Profil de {user_name} mis à jour par l'IA")
             return ToolResponseRecord(
                 tool_call_id=tool_call.id,
                 response_data={'result': "Profil mis à jour avec succès.", 'new_content': new_content},
@@ -843,14 +836,12 @@ IMPORTANT :
         # Mode strict: mentions uniquement
         if mode == 'strict':
             mentioned = self.bot.user.mentioned_in(message)
-            logger.debug(f"Mode strict - Mentioned: {mentioned}")
             return mentioned
         
         # Mode greedy: mentions + nom du bot
         if mode == 'greedy':
             # Vérifier mention directe
             if self.bot.user.mentioned_in(message):
-                logger.debug(f"Mode greedy - Mention directe détectée")
                 return True
             
             # Chercher le nom complet du bot dans le message (insensible à la casse)
@@ -859,10 +850,8 @@ IMPORTANT :
             
             # Seulement le nom complet
             if re.search(rf'\b{re.escape(bot_name_lower)}\b', message_lower):
-                logger.debug(f"Mode greedy - Nom du bot '{self.bot.user.name}' détecté")
                 return True
             
-            logger.debug(f"Mode greedy - Aucune correspondance trouvée")
         
         return False
     
@@ -966,10 +955,46 @@ IMPORTANT :
         
         # Répondre
         async with message.channel.typing():
+            # Message de statut (sera édité avec la réponse finale)
+            status_message: Optional[discord.Message] = None
+            
+            async def update_status(status_text: str):
+                """Callback pour mettre à jour le message de statut.
+                
+                Remplace le statut précédent au lieu de l'accumuler.
+                """
+                nonlocal status_message
+                
+                # Créer le message de statut s'il n'existe pas encore
+                if status_message is None:
+                    use_reply = await self.should_use_reply(message)
+                    
+                    try:
+                        if use_reply:
+                            status_message = await message.reply(
+                                status_text,
+                                mention_author=False,
+                                allowed_mentions=discord.AllowedMentions.none()
+                            )
+                        else:
+                            status_message = await message.channel.send(
+                                status_text,
+                                allowed_mentions=discord.AllowedMentions.none()
+                            )
+                    except Exception as e:
+                        logger.warning(f"Erreur lors de la création du message de statut: {e}")
+                else:
+                    # Remplacer le statut précédent (un seul statut à la fois)
+                    try:
+                        await status_message.edit(content=status_text)
+                    except Exception as e:
+                        logger.warning(f"Erreur lors de l'édition du message de statut: {e}")
+            
             try:
                 response = await self.gpt_api.run_completion(
                     message.channel,
-                    trigger_message=message
+                    trigger_message=message,
+                    status_callback=update_status
                 )
                 
                 # Gestion de la mémoire : incrémenter compteur et planifier MAJ si nécessaire
@@ -990,32 +1015,69 @@ IMPORTANT :
                         headers = list(dict.fromkeys(headers))  # Dédupliquer
                         text = '\n-# ' + '\n-# '.join(headers) + '\n' + text
                 
-                # Décider si on utilise reply ou message normal
-                use_reply = await self.should_use_reply(message)
-                
-                # Découper si nécessaire (limite Discord 2000 caractères)
-                if len(text) <= 2000:
-                    if use_reply:
-                        await message.reply(text, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
-                    else:
-                        await message.channel.send(text, allowed_mentions=discord.AllowedMentions.none())
-                else:
-                    # Découper en morceaux
-                    chunks = []
-                    while len(text) > 2000:
-                        chunk = text[:2000]
-                        text = text[2000:]
-                        chunks.append(chunk)
-                    chunks.append(text)
-                    
-                    for i, chunk in enumerate(chunks):
-                        if use_reply and i == 0:
-                            await message.reply(chunk, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
+                # Si on a un message de statut, l'éditer avec la réponse finale
+                if status_message:
+                    try:
+                        # Découper si nécessaire (limite Discord 2000 caractères)
+                        if len(text) <= 2000:
+                            await status_message.edit(content=text)
                         else:
-                            await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
+                            # Si trop long, envoyer en plusieurs messages
+                            chunks = []
+                            remaining = text
+                            while len(remaining) > 2000:
+                                chunk = remaining[:2000]
+                                remaining = remaining[2000:]
+                                chunks.append(chunk)
+                            chunks.append(remaining)
+                            
+                            # Éditer le premier message avec le premier chunk
+                            await status_message.edit(content=chunks[0])
+                            
+                            # Envoyer les autres chunks
+                            for chunk in chunks[1:]:
+                                await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
+                    except Exception as e:
+                        logger.error(f"Erreur lors de l'édition du message final: {e}")
+                        # Fallback : envoyer un nouveau message
+                        use_reply = await self.should_use_reply(message)
+                        if use_reply:
+                            await message.reply(text, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
+                        else:
+                            await message.channel.send(text, allowed_mentions=discord.AllowedMentions.none())
+                else:
+                    # Pas de message de statut, envoyer normalement
+                    use_reply = await self.should_use_reply(message)
+                    
+                    # Découper si nécessaire (limite Discord 2000 caractères)
+                    if len(text) <= 2000:
+                        if use_reply:
+                            await message.reply(text, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
+                        else:
+                            await message.channel.send(text, allowed_mentions=discord.AllowedMentions.none())
+                    else:
+                        # Découper en morceaux
+                        chunks = []
+                        while len(text) > 2000:
+                            chunk = text[:2000]
+                            text = text[2000:]
+                            chunks.append(chunk)
+                        chunks.append(text)
+                        
+                        for i, chunk in enumerate(chunks):
+                            if use_reply and i == 0:
+                                await message.reply(chunk, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
+                            else:
+                                await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
                 
             except Exception as e:
                 logger.error(f"Erreur lors de la complétion: {e}")
+                # Supprimer le message de statut s'il existe
+                if status_message:
+                    try:
+                        await status_message.delete()
+                    except:
+                        pass
                 await message.reply("❌ Une erreur est survenue lors du traitement de votre message.", 
                                   mention_author=False)
     

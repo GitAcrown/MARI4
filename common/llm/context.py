@@ -158,10 +158,12 @@ class AssistantRecord(MessageRecord):
     def to_payload(self) -> dict:
         """Convertit en format OpenAI."""
         if self.tool_calls:
-            return {
+            payload = {
                 'role': 'assistant',
-                'tool_calls': [tc.to_payload() for tc in self.tool_calls]
+                'tool_calls': [tc.to_payload() for tc in self.tool_calls],
+                'content': None  # OpenAI requiert content: null pour les messages avec tool_calls
             }
+            return payload
         return super().to_payload()
 
 class ToolResponseRecord(MessageRecord):
@@ -179,9 +181,19 @@ class ToolResponseRecord(MessageRecord):
         self.response_data = response_data
     
     def to_payload(self) -> dict:
-        """Convertit en format OpenAI."""
-        payload = super().to_payload()
-        payload['tool_call_id'] = self.tool_call_id
+        """Convertit en format OpenAI.
+        
+        Pour les messages de type 'tool', OpenAI attend 'content' comme une chaîne JSON,
+        pas une liste de composants.
+        """
+        # Pour les tool responses, content doit être une chaîne JSON directement
+        # OpenAI attend que content soit une chaîne, même si c'est du JSON
+        content = json.dumps(self.response_data, ensure_ascii=False)
+        payload = {
+            'role': 'tool',
+            'content': content,
+            'tool_call_id': self.tool_call_id
+        }
         return payload
 
 # CONTEXTE DE CONVERSATION ----------------------------------------
@@ -212,12 +224,10 @@ class ConversationContext:
         # Historique des messages
         self._messages: list[MessageRecord] = []
         
-        logger.debug(f"ConversationContext créé (window={context_window}, age={context_age})")
     
     def add_message(self, message: MessageRecord) -> None:
         """Ajoute un message à l'historique."""
         self._messages.append(message)
-        logger.debug(f"Message ajouté: role={message.role}, tokens={message.token_count}")
     
     def add_user_message(self, components: list[ContentComponent], 
                         name: str = 'user',
@@ -358,9 +368,6 @@ class ConversationContext:
         
         removed_count = len(self._messages) - len(valid_messages)
         self._messages = valid_messages
-        
-        if removed_count > 0:
-            logger.debug(f"Nettoyage: {removed_count} message(s) supprimé(s), {total_tokens} tokens restants")
     
     def prepare_payload(self) -> list[dict]:
         """Prépare le payload pour l'API OpenAI.
@@ -379,7 +386,32 @@ class ConversationContext:
         
         # Construction du payload
         messages = [dev_message] + self._messages
-        return [m.to_payload() for m in messages]
+        payload = [m.to_payload() for m in messages]
+        
+        # Validation : vérifier que les tool responses suivent bien les tool_calls
+        tool_responses = [i for i, m in enumerate(payload) if m.get('role') == 'tool']
+        assistants_with_tools = [i for i, m in enumerate(payload) if m.get('role') == 'assistant' and m.get('tool_calls')]
+        
+        # Log minimal si problème détecté
+        if tool_responses and not assistants_with_tools:
+            logger.warning(f"Tool responses présentes ({len(tool_responses)}) mais aucun assistant avec tool_calls trouvé")
+        
+        if tool_responses:
+            # Vérifier que chaque tool response a un assistant avec tool_calls avant
+            for idx in tool_responses:
+                tool_call_id = payload[idx].get('tool_call_id')
+                # Chercher un assistant avec ce tool_call_id dans les messages précédents
+                found = False
+                for i in range(idx - 1, -1, -1):
+                    if payload[i].get('role') == 'assistant' and payload[i].get('tool_calls'):
+                        tool_call_ids = [tc.get('id') for tc in payload[i].get('tool_calls', [])]
+                        if tool_call_id in tool_call_ids:
+                            found = True
+                            break
+                if not found:
+                    logger.warning(f"Tool response avec tool_call_id={tool_call_id} n'a pas d'assistant correspondant avant")
+        
+        return payload
     
     def get_stats(self) -> dict:
         """Retourne des statistiques sur le contexte."""

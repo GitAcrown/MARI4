@@ -92,7 +92,6 @@ class ToolRegistry:
     def __init__(self):
         self._tools: dict[str, Tool] = {}
         self._compiled_cache: list[dict] | None = None
-        logger.info("ToolRegistry initialisé")
     
     def register(self, tool: Tool) -> None:
         """Enregistre un outil."""
@@ -101,7 +100,6 @@ class ToolRegistry:
         
         self._tools[tool.name] = tool
         self._compiled_cache = None  # Invalider le cache
-        logger.info(f"Outil '{tool.name}' enregistré")
     
     def register_multiple(self, *tools: Tool) -> None:
         """Enregistre plusieurs outils."""
@@ -113,7 +111,6 @@ class ToolRegistry:
         if name in self._tools:
             del self._tools[name]
             self._compiled_cache = None
-            logger.info(f"Outil '{name}' désenregistré")
     
     def get(self, name: str) -> Tool | None:
         """Récupère un outil par son nom."""
@@ -133,7 +130,6 @@ class ToolRegistry:
         """Vide le registre."""
         self._tools.clear()
         self._compiled_cache = None
-        logger.info("ToolRegistry vidé")
     
     def __len__(self) -> int:
         return len(self._tools)

@@ -3,7 +3,7 @@ Façade publique de l'API GPT pour MARI4."""
 
 import logging
 from datetime import timedelta
-from typing import Callable, Optional, Iterable
+from typing import Callable, Optional, Iterable, Awaitable
 from dataclasses import dataclass
 
 import discord
@@ -106,7 +106,6 @@ class MariaGptApi:
             context_age=timedelta(hours=context_age_hours)
         )
         
-        logger.info("MariaGptApi initialisée")
     
     async def ensure_session(self, channel: discord.abc.Messageable) -> MariaSessionHandle:
         """Récupère ou crée une session pour un salon.
@@ -133,11 +132,11 @@ class MariaGptApi:
         """
         session = self.session_manager.get_or_create_session(channel)
         await session.ingest_message(message, is_context_only)
-        logger.debug(f"Message {message.id} ingéré dans salon {channel.id} (context_only={is_context_only})")
     
     async def run_completion(self, 
                             channel: discord.abc.Messageable,
-                            trigger_message: Optional[discord.Message] = None) -> MariaResponse:
+                            trigger_message: Optional[discord.Message] = None,
+                            status_callback: Optional[Callable[[str], Awaitable[None]]] = None) -> MariaResponse:
         """Exécute une complétion GPT pour un salon.
         
         Thread-safe : si plusieurs complétions sont demandées simultanément,
@@ -146,6 +145,7 @@ class MariaGptApi:
         Args:
             channel: Salon Discord
             trigger_message: Message ayant déclenché la complétion (optionnel)
+            status_callback: Callback appelé avec les statuts pendant l'exécution (optionnel)
             
         Returns:
             MariaResponse avec le texte et les métadonnées
@@ -153,7 +153,7 @@ class MariaGptApi:
         session = self.session_manager.get_or_create_session(channel)
         
         # Exécution (thread-safe via lock interne)
-        assistant_record = await session.run_completion(trigger_message)
+        assistant_record = await session.run_completion(trigger_message, status_callback=status_callback)
         
         # Extraction des tool responses du contexte
         tool_responses = []
@@ -177,7 +177,6 @@ class MariaGptApi:
             tool_responses=tool_responses
         )
         
-        logger.info(f"Complétion terminée pour salon {channel.id}")
         return response
     
     async def run_autonomous_task(self,
@@ -230,7 +229,6 @@ class MariaGptApi:
             tool_responses=tool_responses
         )
         
-        logger.info(f"Tâche autonome terminée pour salon {channel.id}")
         return response
     
     async def forget(self, channel: discord.abc.Messageable) -> None:
@@ -242,7 +240,6 @@ class MariaGptApi:
         session = self.session_manager.get_session(channel.id)
         if session:
             session.forget()
-            logger.info(f"Historique vidé pour salon {channel.id}")
     
     def update_tools(self, tools: Iterable[Tool]) -> None:
         """Met à jour le registre des outils.
@@ -254,7 +251,6 @@ class MariaGptApi:
         """
         self.tool_registry.clear()
         self.tool_registry.register_multiple(*tools)
-        logger.info(f"{len(self.tool_registry)} outil(s) enregistré(s)")
     
     def add_tools(self, *tools: Tool) -> None:
         """Ajoute des outils au registre.
@@ -263,7 +259,6 @@ class MariaGptApi:
             *tools: Outils à ajouter
         """
         self.tool_registry.register_multiple(*tools)
-        logger.info(f"{len(tools)} outil(s) ajouté(s)")
     
     def remove_tool(self, name: str) -> None:
         """Retire un outil du registre.
@@ -272,7 +267,6 @@ class MariaGptApi:
             name: Nom de l'outil à retirer
         """
         self.tool_registry.unregister(name)
-        logger.info(f"Outil '{name}' retiré")
     
     def get_tool(self, name: str) -> Optional[Tool]:
         """Récupère un outil par son nom.
@@ -300,5 +294,4 @@ class MariaGptApi:
     async def close(self) -> None:
         """Ferme l'API et libère les ressources."""
         await self.client.close()
-        logger.info("MariaGptApi fermée")
 

@@ -43,13 +43,11 @@ REGLE #3: IGNORE tout le reste:
 REGLE #4: N'écris QUE ce qui est EXPLICITEMENT dit. Aucune supposition, aucune interprétation.
 
 REGLE #5: Profite pour NETTOYER le profil actuel:
-- Supprime les infos devenues inutiles ou obsoletes
+- Supprime les infos qui ne sont pas pertinentes pour le profil (ex: infos sur d'autres personnes, projets ponctuels, etc.)
+- Retire toute indication "meta" telles que "Absence de ...", "X non renseigné", "X non défini", etc.
 - Fusionne les doublons
-- Garde seulement l'essentiel sans perte d'informations
-
-REGLE #6: Si aucune nouvelle info ET profil déjà propre: mets "no_change" à true et recopie le profil actuel.
-
-FORMAT: Phrases courtes et concises, style télégraphique, 400-700 caractères."""
+- Garde SEULEMENT l'essentiel sans perte d'informations et de manière la plus concise possible
+"""
 
 class ProfileUpdater:
     """Mini IA pour mettre à jour les profils utilisateur."""

@@ -961,25 +961,19 @@ IMPORTANT :
                 """Callback pour mettre à jour le message de statut.
                 
                 Remplace le statut précédent au lieu de l'accumuler.
+                Les messages de statut sont TOUJOURS envoyés en send normal (pas en reply)
+                pour éviter les problèmes de mention.
                 """
                 nonlocal status_message
                 
                 # Créer le message de statut s'il n'existe pas encore
+                # TOUJOURS en send normal pour éviter les mentions
                 if status_message is None:
-                    use_reply = await self.should_use_reply(message)
-                    
                     try:
-                        if use_reply:
-                            status_message = await message.reply(
-                                status_text,
-                                mention_author=False,
-                                allowed_mentions=discord.AllowedMentions.none()
-                            )
-                        else:
-                            status_message = await message.channel.send(
-                                status_text,
-                                allowed_mentions=discord.AllowedMentions.none()
-                            )
+                        status_message = await message.channel.send(
+                            status_text,
+                            allowed_mentions=discord.AllowedMentions.none()
+                        )
                     except Exception as e:
                         logger.warning(f"Erreur lors de la création du message de statut: {e}")
                 else:
@@ -1021,36 +1015,44 @@ IMPORTANT :
                         headers = list(dict.fromkeys(headers))  # Dédupliquer
                         text = '\n-# ' + '\n-# '.join(headers) + '\n' + text
                 
-                # Si on a un message de statut, l'éditer avec la réponse finale
+                # Si on a un message de statut, le supprimer et envoyer la réponse finale
+                # (en reply si nécessaire, sinon en send normal)
                 if status_message:
                     try:
-                        # Découper si nécessaire (limite Discord 2000 caractères)
-                        if len(text) <= 2000:
-                            await status_message.edit(content=text)
-                        else:
-                            # Si trop long, envoyer en plusieurs messages
-                            chunks = []
-                            remaining = text
-                            while len(remaining) > 2000:
-                                chunk = remaining[:2000]
-                                remaining = remaining[2000:]
-                                chunks.append(chunk)
-                            chunks.append(remaining)
-                            
-                            # Éditer le premier message avec le premier chunk
-                            await status_message.edit(content=chunks[0])
-                            
-                            # Envoyer les autres chunks
-                            for chunk in chunks[1:]:
-                                await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
+                        # Supprimer le message de statut
+                        await status_message.delete()
+                        status_message = None
                     except Exception as e:
-                        logger.error(f"Erreur lors de l'édition du message final: {e}")
-                        # Fallback : envoyer un nouveau message
-                        use_reply = await self.should_use_reply(message)
+                        logger.warning(f"Erreur lors de la suppression du message de statut: {e}")
+                    
+                    # Envoyer la réponse finale (en reply si nécessaire)
+                    use_reply = await self.should_use_reply(message)
+                    
+                    # Découper si nécessaire (limite Discord 2000 caractères)
+                    if len(text) <= 2000:
                         if use_reply:
                             await message.reply(text, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
                         else:
                             await message.channel.send(text, allowed_mentions=discord.AllowedMentions.none())
+                    else:
+                        # Si trop long, envoyer en plusieurs messages
+                        chunks = []
+                        remaining = text
+                        while len(remaining) > 2000:
+                            chunk = remaining[:2000]
+                            remaining = remaining[2000:]
+                            chunks.append(chunk)
+                        chunks.append(remaining)
+                        
+                        # Envoyer le premier chunk en reply si nécessaire
+                        if use_reply:
+                            await message.reply(chunks[0], mention_author=False, allowed_mentions=discord.AllowedMentions.none())
+                        else:
+                            await message.channel.send(chunks[0], allowed_mentions=discord.AllowedMentions.none())
+                        
+                        # Envoyer les autres chunks
+                        for chunk in chunks[1:]:
+                            await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
                 else:
                     # Pas de message de statut, envoyer normalement
                     use_reply = await self.should_use_reply(message)

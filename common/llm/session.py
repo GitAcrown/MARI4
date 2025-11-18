@@ -489,7 +489,20 @@ class ChannelSession:
     async def _execute_tools(self, 
                            tool_calls: list[ToolCallRecord],
                            status_callback: Optional[Callable[[str], Awaitable[None]]] = None) -> None:
-        """Exécute les appels d'outils et ajoute les réponses au contexte."""
+        """Exécute les appels d'outils et ajoute les réponses au contexte.
+        
+        Les outils sont exécutés en parallèle quand possible pour accélérer le processus.
+        """
+        if not tool_calls:
+            return
+        
+        # Outils qui peuvent être exécutés en parallèle (recherches web, lectures de pages indépendantes)
+        parallelizable_tools = {'search_web', 'read_web_page'}
+        
+        # Séparer les outils parallélisables et séquentiels
+        parallel_tools = []
+        sequential_tools = []
+        
         for tool_call in tool_calls:
             if self._tool_call_counter is None:
                 self._tool_call_counter = defaultdict(int)
@@ -516,6 +529,46 @@ class ChannelSession:
                 logger.warning(f"Outil '{tool_call.function_name}' non trouvé")
                 continue
             
+            if tool_call.function_name in parallelizable_tools:
+                parallel_tools.append((tool_call, tool))
+            else:
+                sequential_tools.append((tool_call, tool))
+        
+        # Exécuter les outils parallélisables en parallèle
+        if parallel_tools:
+            async def execute_single_tool(tool_call, tool, index):
+                # Générer un message de statut pour le callback
+                if status_callback:
+                    status_msg = self._get_tool_status_message(tool_call)
+                    if status_msg:
+                        try:
+                            await status_callback(status_msg)
+                        except Exception as e:
+                            logger.warning(f"Erreur lors de l'appel du callback de statut: {e}")
+                
+                try:
+                    response = await tool.execute(tool_call, context_data=self)
+                    return (index, response)
+                except Exception as e:
+                    logger.error(f"Erreur exécution outil '{tool_call.function_name}': {e}")
+                    return (index, None)
+            
+            # Exécuter en parallèle
+            results = await asyncio.gather(*[
+                execute_single_tool(tool_call, tool, i) 
+                for i, (tool_call, tool) in enumerate(parallel_tools)
+            ], return_exceptions=True)
+            
+            # Trier par index pour préserver l'ordre et ajouter les réponses au contexte
+            sorted_results = sorted(
+                [r for r in results if not isinstance(r, Exception) and r[1] is not None],
+                key=lambda x: x[0]
+            )
+            for _, response in sorted_results:
+                self.context.add_message(response)
+        
+        # Exécuter les outils séquentiels
+        for tool_call, tool in sequential_tools:
             # Générer un message de statut pour le callback
             if status_callback:
                 status_msg = self._get_tool_status_message(tool_call)

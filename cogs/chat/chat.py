@@ -996,15 +996,22 @@ IMPORTANT :
                     status_callback=update_status
                 )
                 
-                # Gestion de la mémoire : incrémenter compteur et planifier MAJ si nécessaire
-                recent_messages = []
-                async for msg in message.channel.history(limit=20):
-                    if msg.author.id == message.author.id and not msg.author.bot:
-                        recent_messages.append(msg)
+                # Gestion de la mémoire : en arrière-plan pour ne pas bloquer la réponse
+                async def update_memory_background():
+                    try:
+                        recent_messages = []
+                        async for msg in message.channel.history(limit=20):
+                            if msg.author.id == message.author.id and not msg.author.bot:
+                                recent_messages.append(msg)
+                        
+                        if recent_messages:
+                            self.memory.increment_message_count(message.author.id)
+                            await self.memory.check_and_schedule_update(message.author.id, recent_messages)
+                    except Exception as e:
+                        logger.debug(f"Erreur mise à jour mémoire en arrière-plan: {e}")
                 
-                if recent_messages:
-                    self.memory.increment_message_count(message.author.id)
-                    await self.memory.check_and_schedule_update(message.author.id, recent_messages)
+                # Lancer la mise à jour de la mémoire en arrière-plan
+                asyncio.create_task(update_memory_background())
                 
                 # Formater la réponse avec headers des outils
                 text = response.text

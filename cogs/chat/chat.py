@@ -513,6 +513,35 @@ class Chat(commands.Cog):
         )
         tools.append(cancel_task_tool)
         
+        get_server_users_tool = Tool(
+            name='get_server_users',
+            description=(
+                "Obtient la liste des utilisateurs du serveur Discord actuel. "
+                "UTILISE POUR: connaître les membres du serveur, leurs noms et IDs. "
+                "Retourne les informations de base : nom d'utilisateur, nom d'affichage (display name) et ID Discord."
+            ),
+            properties={},
+            function=self._tool_get_server_users
+        )
+        tools.append(get_server_users_tool)
+        
+        get_user_profile_tool = Tool(
+            name='get_user_profile',
+            description=(
+                "Consulte le profil mémorisé d'un utilisateur du serveur. "
+                "UTILISE POUR: connaître les informations personnelles que j'ai retenues sur un utilisateur. "
+                "Retourne le profil si disponible, sinon indique qu'aucun profil n'existe pour cet utilisateur."
+            ),
+            properties={
+                'user_id': {
+                    'type': 'string',
+                    'description': "ID Discord de l'utilisateur dont tu veux consulter le profil (ex: '123456789012345678')"
+                }
+            },
+            function=self._tool_get_user_profile
+        )
+        tools.append(get_user_profile_tool)
+        
         if tools:
             self.gpt_api.add_tools(*tools)
     
@@ -805,6 +834,139 @@ IMPORTANT :
                 tool_call_id=tool_call.id,
                 response_data={'error': "Échec de la mise à jour"},
                 created_at=datetime.now(timezone.utc)
+            )
+    
+    async def _tool_get_server_users(self, tool_call: ToolCallRecord, context_data) -> ToolResponseRecord:
+        """Obtient la liste des utilisateurs du serveur Discord actuel.
+        
+        Retourne le nom d'utilisateur, le nom d'affichage et l'ID Discord de chaque membre.
+        """
+        if not context_data or not hasattr(context_data, 'trigger_message') or not context_data.trigger_message:
+            return ToolResponseRecord(
+                tool_call_id=tool_call.id,
+                response_data={'error': "Message déclencheur introuvable"},
+                created_at=datetime.now(timezone.utc)
+            )
+        
+        trigger_message = context_data.trigger_message
+        guild = trigger_message.guild
+        
+        if not guild:
+            return ToolResponseRecord(
+                tool_call_id=tool_call.id,
+                response_data={'error': "Ce message n'est pas dans un serveur"},
+                created_at=datetime.now(timezone.utc)
+            )
+        
+        # Récupérer tous les membres du serveur
+        users_list = []
+        for member in guild.members:
+            # Ignorer les bots
+            if member.bot:
+                continue
+            
+            users_list.append({
+                'user_id': str(member.id),
+                'username': member.name,
+                'display_name': member.display_name,
+                'discriminator': member.discriminator if hasattr(member, 'discriminator') else None
+            })
+        
+        # Trier par nom d'utilisateur
+        users_list.sort(key=lambda x: x['username'].lower())
+        
+        return ToolResponseRecord(
+            tool_call_id=tool_call.id,
+            response_data={
+                'users': users_list,
+                'total': len(users_list),
+                'server_name': guild.name
+            },
+            created_at=datetime.now(timezone.utc),
+            metadata={'header': f"Liste des utilisateurs de ***{guild.name}***"}
+        )
+    
+    async def _tool_get_user_profile(self, tool_call: ToolCallRecord, context_data) -> ToolResponseRecord:
+        """Consulte le profil mémorisé d'un utilisateur du serveur.
+        
+        Retourne le profil si disponible, sinon indique qu'aucun profil n'existe.
+        """
+        if not context_data or not hasattr(context_data, 'trigger_message') or not context_data.trigger_message:
+            return ToolResponseRecord(
+                tool_call_id=tool_call.id,
+                response_data={'error': "Message déclencheur introuvable"},
+                created_at=datetime.now(timezone.utc)
+            )
+        
+        trigger_message = context_data.trigger_message
+        guild = trigger_message.guild
+        
+        if not guild:
+            return ToolResponseRecord(
+                tool_call_id=tool_call.id,
+                response_data={'error': "Ce message n'est pas dans un serveur"},
+                created_at=datetime.now(timezone.utc)
+            )
+        
+        # Récupérer l'ID utilisateur depuis les arguments
+        args = tool_call.arguments or {}
+        user_id_str = args.get('user_id')
+        
+        if not user_id_str:
+            return ToolResponseRecord(
+                tool_call_id=tool_call.id,
+                response_data={'error': "ID utilisateur manquant"},
+                created_at=datetime.now(timezone.utc)
+            )
+        
+        try:
+            user_id = int(user_id_str)
+        except (ValueError, TypeError):
+            return ToolResponseRecord(
+                tool_call_id=tool_call.id,
+                response_data={'error': f"ID utilisateur invalide: {user_id_str}"},
+                created_at=datetime.now(timezone.utc)
+            )
+        
+        # Vérifier que l'utilisateur existe dans le serveur
+        member = guild.get_member(user_id)
+        if not member:
+            return ToolResponseRecord(
+                tool_call_id=tool_call.id,
+                response_data={
+                    'error': f"Utilisateur {user_id} introuvable dans le serveur",
+                    'user_id': str(user_id)
+                },
+                created_at=datetime.now(timezone.utc)
+            )
+        
+        # Récupérer le profil depuis la mémoire
+        profile_text = self.memory.get_profile_text(user_id)
+        
+        if profile_text:
+            return ToolResponseRecord(
+                tool_call_id=tool_call.id,
+                response_data={
+                    'user_id': str(user_id),
+                    'username': member.name,
+                    'display_name': member.display_name,
+                    'profile': profile_text
+                },
+                created_at=datetime.now(timezone.utc),
+                metadata={'header': f"Profil de ***{member.display_name}***"}
+            )
+        else:
+            return ToolResponseRecord(
+                tool_call_id=tool_call.id,
+                response_data={
+                    'user_id': str(user_id),
+                    'username': member.name,
+                    'display_name': member.display_name,
+                    'profile': None,
+                    'message': f"Aucun profil mémorisé pour {member.display_name}"
+                },
+                created_at=datetime.now(timezone.utc),
+                metadata={'header': f"Profil de ***{member.display_name}***"}
             )
     
     # CONFIGURATION -----------------------------------------------

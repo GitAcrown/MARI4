@@ -32,7 +32,7 @@ MAX_TEXT_CONTENT_LENGTH = 100000  # 100k caractères
 # Configuration analyse vidéo
 VIDEO_ANALYSIS_MODEL = 'gpt-4.1-mini'
 VIDEO_ANALYSIS_AUDIO_MODEL = 'gpt-4o-mini-transcribe'
-VIDEO_ANALYSIS_TEMPERATURE = 0.15
+VIDEO_ANALYSIS_TEMPERATURE = 0.1
 VIDEO_ANALYSIS_MAX_TOKENS = 1000
 VIDEO_ANALYSIS_NB_FRAMES = 10
 VIDEO_ANALYSIS_PROMPT = """A partir des éléments fournis (images et transcription audio) qui ont été extraits d'une vidéo, réalise une description EXTREMEMENT DÉTAILLÉE (sujets, actions, scène, apparences etc.). Ne répond qu'avec cette description sans aucun autre texte. Les images sont fournies dans l'ordre chronologique et sont des frames extraites à intervalles égaux de la vidéo."""

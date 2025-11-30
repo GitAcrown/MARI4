@@ -79,7 +79,7 @@ class ChannelSession:
         
         # Compteur global de tool calls pour éviter les boucles infinies
         self._total_tool_calls_in_session: int = 0
-        self._max_tool_calls_per_completion = 20  # Limite globale
+        self._max_tool_calls_per_completion = 25  # Limite globale
         
         # Message ayant déclenché la complétion en cours
         self.trigger_message: Optional[discord.Message] = None

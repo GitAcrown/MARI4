@@ -17,8 +17,8 @@ logger = logging.getLogger(f'MARI4.llm.context')
 GPT_TOKENIZER = tiktoken.get_encoding('cl100k_base')
 
 # Configuration par défaut du contexte
-DEFAULT_CONTEXT_WINDOW = 24_576  # 24k tokens
-DEFAULT_CONTEXT_AGE = timedelta(hours=2)  # 2h
+DEFAULT_CONTEXT_WINDOW = 16_384  # 16k tokens
+DEFAULT_CONTEXT_AGE = timedelta(hours=3)  # 3h
 
 
 # COMPOSANTS DE CONTENU -------------------------------------------

@@ -101,18 +101,27 @@ class Web(commands.Cog):
         self.GLOBAL_TOOLS = [
             Tool(
                 name='search_web',
-                description='Recherche sur le web et retourne des resultats avec extraits. Utilise pour toute info recente ou inconnue. Si besoin de plus de details, utilise ensuite read_web_page sur une URL specifique.',
+                description=(
+                    'Recherche web pour informations INCONNUES ou RECENTES (apres sept 2024). '
+                    'UTILISE UNE SEULE FOIS par requete utilisateur. '
+                    'NE PAS utiliser pour infos generales ou connaissances de base. '
+                    'Retourne 4 resultats avec extraits enrichis.'
+                ),
                 properties={
-                    'query': {'type': 'string', 'description': 'Requete de recherche concise'},
+                    'query': {'type': 'string', 'description': 'Requete de recherche concise et precise'},
                     'lang': {'type': 'string', 'description': 'Code langue (fr, en, es, etc.). Par defaut: fr', 'default': 'fr'}
                 },
                 function=self._tool_search_web
             ),
             Tool(
                 name='read_web_page',
-                description='Lit le contenu complet d\'une URL specifique. Utilise si: 1) l\'utilisateur donne une URL, 2) les extraits de search_web sont insuffisants et tu veux approfondir.',
+                description=(
+                    'Lit le contenu complet d\'une URL specifique. '
+                    'UTILISE UNIQUEMENT si: 1) utilisateur donne une URL, 2) extraits de search_web insuffisants. '
+                    'Ne lis qu\'UNE SEULE page par requete.'
+                ),
                 properties={
-                    'url': {'type': 'string', 'description': 'URL complete de la page'}
+                    'url': {'type': 'string', 'description': 'URL complete de la page a lire'}
                 },
                 function=self._tool_read_web_page
             )

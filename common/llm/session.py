@@ -25,8 +25,9 @@ logger = logging.getLogger(f'MARI4.llm.session')
 
 # CONSTANTES ------------------------------------------------------
 
-# Format par défaut pour les messages utilisateur
-DEFAULT_USER_FORMAT = '[{message.id}] {message.author.name} ({message.author.id})'
+# Format simplifié pour les messages utilisateur (moins verbeux pour économiser tokens)
+# Ancien format: '[{message.id}] {message.author.name} ({message.author.id})'
+DEFAULT_USER_FORMAT = '{message.author.name}'
 
 # CHANNEL SESSION -------------------------------------------------
 
@@ -107,9 +108,14 @@ class ChannelSession:
         
         # Contenu texte
         if message.content:
-            user_format = DEFAULT_USER_FORMAT.format(message=message)
-            context_marker = "[CONTEXTE] " if is_context_only else ""
-            components.append(TextComponent(f"{context_marker}{user_format}: {message.clean_content}"))
+            user_name = DEFAULT_USER_FORMAT.format(message=message)
+            if is_context_only:
+                # Format compact pour messages de contexte
+                formatted_text = f"[CONTEXTE] {user_name}: {message.clean_content}"
+            else:
+                # Format normal pour messages à traiter
+                formatted_text = f"{user_name}: {message.clean_content}"
+            components.append(TextComponent(formatted_text))
             
             # Extraction URLs d'images dans le texte
             for match in re.finditer(r'(https?://[^\s]+)', message.content):
@@ -161,7 +167,7 @@ class ChannelSession:
                     url = f"{url}?format=png" if '?' not in url else f"{url}&format=png"
                 components.append(ImageComponent(url, detail='auto'))
         
-        # Références
+        # Références (format plus clair et naturel)
         if message.reference and message.reference.resolved:
             ref_msg = message.reference.resolved
             # Extraire le contenu du message référencé
@@ -174,21 +180,19 @@ class ChannelSession:
                         break
             
             # Limiter la longueur pour éviter de surcharger le contexte
-            if len(ref_content) > 300:
-                ref_preview = ref_content[:300].replace('\n', ' ') + '...'
+            if len(ref_content) > 200:
+                ref_preview = ref_content[:200].replace('\n', ' ') + '...'
             else:
                 ref_preview = ref_content.replace('\n', ' ') if ref_content else "(message sans texte)"
             
-            # Si référence au bot
+            # Format plus naturel et explicite
             if ref_msg.author.bot:
-                components.append(MetadataComponent('REFERENCE', yourself=True, starting_with=ref_preview))
+                ref_text = f"[L'utilisateur répond à ton message précédent : \"{ref_preview}\"]"
             else:
-                # Référence à un autre utilisateur : inclure auteur et contenu
                 author_name = ref_msg.author.name
-                components.append(MetadataComponent('REFERENCE', 
-                                                   author=author_name,
-                                                   message_id=ref_msg.id,
-                                                   content=ref_preview))
+                ref_text = f"[L'utilisateur répond à {author_name} qui disait : \"{ref_preview}\"]"
+            
+            components.append(TextComponent(ref_text))
         
         # Créer le record
         record = self.context.add_user_message(
@@ -496,8 +500,14 @@ class ChannelSession:
         if not tool_calls:
             return
         
-        # Outils qui peuvent être exécutés en parallèle (recherches web, lectures de pages indépendantes)
-        parallelizable_tools = {'search_web', 'read_web_page'}
+        # Outils qui peuvent être exécutés en parallèle (sans dépendances entre eux)
+        parallelizable_tools = {
+            'search_web',           # Recherches web
+            'read_web_page',        # Lectures de pages
+            'math_eval',            # Calculs mathématiques
+            'get_server_users',     # Récupération liste utilisateurs
+            'get_user_profile'      # Consultation profils utilisateurs
+        }
         
         # Séparer les outils parallélisables et séquentiels
         parallel_tools = []

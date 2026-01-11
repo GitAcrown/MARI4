@@ -33,32 +33,48 @@ SCHEDULER_DB_PATH = 'data/scheduler.db'
 DEVELOPER_PROMPT_TEMPLATE = lambda args: f"""Tu es un bot Discord nommée MARIA conversant dans un salon écrit.
 
 STYLE:
-• Adopte le ton de l'historique des messages du salon en restant reste concise, conversationnelle et familière
+• Adopte le ton de l'historique des messages du salon en restant concise, conversationnelle et familière
 • Pas de formules robotiques, de questions subsidiaires inutiles ou de réponses verbeuses
-• Essaye de deviner l'intention de l'utilisateur et ne pas demander de précisions dans les demandes sauf si absolument nécessaire
 • Public : jeunes adultes début gen Z, habitués au trash, humour noir, d'internet
 
+COMPORTEMENT:
+• Si tu manques d'informations factuelles (dates, données récentes, définitions), utilise TOUJOURS les outils de recherche
+• Si la demande est ambiguë sur le SENS (pas sur les faits), devine l'intention la plus probable
+• Ne demande des précisions que si plusieurs interprétations sont également plausibles et importantes
+
 CONTEXTE:
-• Les messages du salon sont fournis pour contexte, tu ne répond qu'au dernier message qui te mentionne ou ceux qui parlent indirectement de toi
-• Les messages marqués "[CONTEXTE]" sont juste pour info - ne les commente pas et n'y réponds pas sauf si demandé
+• Tu reçois l'historique récent du salon pour comprendre la conversation
+• Réponds UNIQUEMENT au dernier message qui te mentionne ou te demande quelque chose
+• Les messages marqués [CONTEXTE] sont là pour ta compréhension mais ne nécessitent PAS de réponse
+• Si l'utilisateur te demande explicitement quelque chose sur un message de contexte, tu peux y répondre
+
+LIMITES:
+• Tu NE PEUX PAS exécuter du code en direct
+• Tu NE PEUX PAS faire des tâches asynchrones (attendre, vérifier plus tard) sauf via schedule_task
+• Tu NE PEUX PAS accéder à des données privées ou systèmes externes sans outil
+• Tu NE PEUX PAS modérer directement les messages des utilisateurs, bloquer un membre ou un message
+• Si on te demande l'impossible, explique pourquoi clairement
 
 OUTILS:
-• Utilise tous les outils de manière proactive, en les combinant et les utilisant de manière autonome et sans demander de permission ou de confirmation
+• Utilise tous les outils de manière proactive, en les combinant et les utilisant de manière autonome
+• Pas besoin de demander permission ou confirmation avant d'utiliser un outil
 
 MÉMOIRE:
-• Utilise update_user_profile dès que l'auteur partage une info durable, nouvelle ou une mise à jour
-• Si une information basique (identité, age, sexe, etc.) est déjà présente, la mettre à jour systématiquement, la plus récente information étant prioritaire
-• L'outil ne doit être utilisé que pour l'auteur du message (le demandeur)
+• Utilise update_user_profile UNIQUEMENT pour l'auteur du message actuel
+• Informations à retenir: identité (prénom, âge, métier, ville), préférences de communication, compétences
+• Informations à IGNORER: actions ponctuelles, opinions temporaires, infos sur d'autres personnes
+• Si l'utilisateur dit "je suis X" et c'est différent du profil, mets à jour IMMÉDIATEMENT
+• TOUJOURS mettre à jour si nouvelle information durable, même si légère modification
 
 RECHERCHE:
-• Utilise les outils de recherche web avant de répondre à TOUTE QUESTION dont il te manque des informations (si trop récentes ou pour définir un terme inconnu)
-• Utilise read_web_page dès que les extraits de la recherche web ne suffisent pas à répondre à la question
-• Adapte la langue de recherche à la demande
+• Utilise search_web pour: actualités récentes, données factuelles vérifiables, définitions de termes inconnus
+• Adapte la langue de recherche à la demande de l'utilisateur
+• Si les extraits sont insuffisants, utilise read_web_page pour approfondir
+• N'hésite PAS à rechercher au moindre doute sur une information factuelle
+• Pas besoin de rechercher pour: discussions générales, opinions, questions sur le serveur Discord
 
 FORMAT:
-Messages utilisateurs : "[id] username (user_id) : message"
-→ "[id] username (user_id)" est un identifiant technique. Ne le reproduis JAMAIS.
-→ Le contenu du message est après ":"
+Messages utilisateurs : "username: message" ou "[CONTEXTE] username: message"
 → Ne reproduis jamais ce format dans tes réponses, ni ne le commente
 
 {args.get('user_profile', '')}
@@ -69,6 +85,45 @@ Date: {args['weekday']} {args['datetime']} (Paris) | Limite de connaissances : S
 
 VALID_CHATBOT_CHANNELS = Union[discord.TextChannel, discord.VoiceChannel, discord.Thread]
 MAX_EDITION_AGE = timedelta(minutes=2)
+
+# UTILITAIRES -----------------------------------------------------
+
+async def send_long_message(
+    channel: discord.abc.Messageable,
+    text: str,
+    reply_to: Optional[discord.Message] = None,
+    max_chunk_size: int = 2000
+) -> None:
+    """Envoie un message long en le découpant si nécessaire.
+    
+    Args:
+        channel: Salon où envoyer le message
+        text: Texte à envoyer
+        reply_to: Message auquel répondre (optionnel)
+        max_chunk_size: Taille max par chunk (défaut: 2000)
+    """
+    if len(text) <= max_chunk_size:
+        if reply_to:
+            await reply_to.reply(text, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
+        else:
+            await channel.send(text, allowed_mentions=discord.AllowedMentions.none())
+        return
+    
+    # Découper en chunks
+    chunks = []
+    remaining = text
+    while len(remaining) > max_chunk_size:
+        chunk = remaining[:max_chunk_size]
+        remaining = remaining[max_chunk_size:]
+        chunks.append(chunk)
+    chunks.append(remaining)
+    
+    # Envoyer
+    for i, chunk in enumerate(chunks):
+        if i == 0 and reply_to:
+            await reply_to.reply(chunk, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
+        else:
+            await channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
 
 # UI VIEWS --------------------------------------------------------
 
@@ -614,28 +669,12 @@ IMPORTANT :
         
         # Envoyer en reply au message d'origine ou normalement
         try:
-            if len(text) <= 2000:
-                if original_message:
-                    await original_message.reply(text)
-                else:
-                    await channel.send(text)
-            else:
-                # Découper si nécessaire
-                chunks = []
-                while len(text) > 1900:
-                    chunk = text[:1900]
-                    text = text[1900:]
-                    chunks.append(chunk)
-                chunks.append(text)
-                
-                for i, chunk in enumerate(chunks):
-                    if i == 0:
-                        if original_message:
-                            await original_message.reply(chunk)
-                        else:
-                            await channel.send(chunk)
-                    else:
-                        await channel.send(chunk)
+            await send_long_message(
+                channel,
+                text,
+                reply_to=original_message,
+                max_chunk_size=1900  # Légèrement plus petit pour les tâches autonomes
+            )
         except discord.Forbidden:
             logger.error(f"Pas de permission pour envoyer dans {channel.id}")
             raise  # Re-raise pour marquer la tâche comme failed
@@ -804,9 +843,9 @@ IMPORTANT :
         user_id = trigger_message.author.id
         user_name = trigger_message.author.name
         
-        # Récupérer les 20 derniers messages de l'utilisateur
+        # Récupérer les 30 derniers messages de l'utilisateur (plus de contexte pour meilleure MAJ)
         recent_messages = []
-        async for msg in trigger_message.channel.history(limit=20):
+        async for msg in trigger_message.channel.history(limit=30):
             if msg.author.id == user_id and not msg.author.bot:
                 recent_messages.append(msg)
         
@@ -1186,56 +1225,19 @@ IMPORTANT :
                     
                     # Envoyer la réponse finale (en reply si nécessaire)
                     use_reply = await self.should_use_reply(message)
-                    
-                    # Découper si nécessaire (limite Discord 2000 caractères)
-                    if len(text) <= 2000:
-                        if use_reply:
-                            await message.reply(text, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
-                        else:
-                            await message.channel.send(text, allowed_mentions=discord.AllowedMentions.none())
-                    else:
-                        # Si trop long, envoyer en plusieurs messages
-                        chunks = []
-                        remaining = text
-                        while len(remaining) > 2000:
-                            chunk = remaining[:2000]
-                            remaining = remaining[2000:]
-                            chunks.append(chunk)
-                        chunks.append(remaining)
-                        
-                        # Envoyer le premier chunk en reply si nécessaire
-                        if use_reply:
-                            await message.reply(chunks[0], mention_author=False, allowed_mentions=discord.AllowedMentions.none())
-                        else:
-                            await message.channel.send(chunks[0], allowed_mentions=discord.AllowedMentions.none())
-                        
-                        # Envoyer les autres chunks
-                        for chunk in chunks[1:]:
-                            await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
+                    await send_long_message(
+                        message.channel,
+                        text,
+                        reply_to=message if use_reply else None
+                    )
                 else:
                     # Pas de message de statut, envoyer normalement
                     use_reply = await self.should_use_reply(message)
-                    
-                    # Découper si nécessaire (limite Discord 2000 caractères)
-                    if len(text) <= 2000:
-                        if use_reply:
-                            await message.reply(text, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
-                        else:
-                            await message.channel.send(text, allowed_mentions=discord.AllowedMentions.none())
-                    else:
-                        # Découper en morceaux
-                        chunks = []
-                        while len(text) > 2000:
-                            chunk = text[:2000]
-                            text = text[2000:]
-                            chunks.append(chunk)
-                        chunks.append(text)
-                        
-                        for i, chunk in enumerate(chunks):
-                            if use_reply and i == 0:
-                                await message.reply(chunk, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
-                            else:
-                                await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
+                    await send_long_message(
+                        message.channel,
+                        text,
+                        reply_to=message if use_reply else None
+                    )
                 
             except Exception as e:
                 logger.error(f"Erreur lors de la complétion: {e}")
@@ -1295,28 +1297,13 @@ IMPORTANT :
                         headers_text = '\n-# ' + '\n-# '.join(headers) + '\n'
                         text = headers_text + text
                 
-                # Décider si on utilise reply ou message normal
+                # Décider si on utilise reply ou message normal et envoyer
                 use_reply = await self.should_use_reply(after)
-                
-                # Envoyer
-                if len(text) <= 2000:
-                    if use_reply:
-                        await after.reply(text, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
-                    else:
-                        await after.channel.send(text, allowed_mentions=discord.AllowedMentions.none())
-                else:
-                    chunks = []
-                    while len(text) > 2000:
-                        chunk = text[:2000]
-                        text = text[2000:]
-                        chunks.append(chunk)
-                    chunks.append(text)
-                    
-                    for i, chunk in enumerate(chunks):
-                        if use_reply and i == 0:
-                            await after.reply(chunk, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
-                        else:
-                            await after.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
+                await send_long_message(
+                    after.channel,
+                    text,
+                    reply_to=after if use_reply else None
+                )
                 
             except Exception as e:
                 logger.error(f"Erreur lors de la complétion (edit): {e}")

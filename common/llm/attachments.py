@@ -26,6 +26,7 @@ if not TEMP_DIR.exists():
 
 # Limites de taille
 MAX_VIDEO_SIZE = 20 * 1024 * 1024  # 20 Mo
+MAX_VIDEO_DURATION = 180  # 3 minutes max (pour éviter surcharge)
 MAX_TEXT_FILE_SIZE = 1024 * 1024  # 1 Mo
 MAX_TEXT_CONTENT_LENGTH = 100000  # 100k caractères
 
@@ -34,8 +35,23 @@ VIDEO_ANALYSIS_MODEL = 'gpt-4.1-mini'
 VIDEO_ANALYSIS_AUDIO_MODEL = 'gpt-4o-mini-transcribe'
 VIDEO_ANALYSIS_TEMPERATURE = 0.1
 VIDEO_ANALYSIS_MAX_TOKENS = 1000
-VIDEO_ANALYSIS_NB_FRAMES = 10
-VIDEO_ANALYSIS_PROMPT = """A partir des éléments fournis (images et transcription audio) qui ont été extraits d'une vidéo, réalise une description EXTREMEMENT DÉTAILLÉE (sujets, actions, scène, apparences etc.). Ne répond qu'avec cette description sans aucun autre texte. Les images sont fournies dans l'ordre chronologique et sont des frames extraites à intervalles égaux de la vidéo."""
+VIDEO_ANALYSIS_NB_FRAMES = 6  # 6 frames = bon compromis qualité/coût (au lieu de 10)
+VIDEO_ANALYSIS_MIN_FRAMES = 3  # Minimum de frames nécessaires pour analyse
+
+# Taille max pour les images avant encodage base64
+MAX_IMAGE_SIZE = (512, 512)  # 512x512 max pour réduire coût API
+
+VIDEO_ANALYSIS_PROMPT = """Analyse les frames et la transcription audio de cette vidéo.
+
+CONTENU À DÉCRIRE:
+- Sujet principal et contexte
+- Actions et évènements visibles
+- Personnes présentes (apparence, actions)
+- Environnement et décor
+- Audio notable (musique, dialogues, bruits)
+
+FORMAT: Paragraphe structuré de 150-200 mots maximum, direct et factuel.
+INTERDICTIONS: Pas d'introduction ("Dans cette vidéo..."), pas de conclusion, pas de spéculation."""
 
 # CACHE -----------------------------------------------------------
 
@@ -135,17 +151,24 @@ async def process_video_attachment(attachment: discord.Attachment,
     if cached:
         return [cached]
     
-    # Vérification taille
-    if attachment.size > MAX_VIDEO_SIZE:
-        logger.warning(f"Vidéo trop volumineuse: {attachment.filename}")
+    # Validation préalable
+    validation_error = await _validate_video_before_processing(attachment)
+    if validation_error:
+        logger.warning(f"Vidéo invalide: {attachment.filename} - {validation_error}")
         return [MetadataComponent('VIDEO',
                                  filename=attachment.filename,
                                  size=attachment.size,
-                                 error='FILE_TOO_LARGE')]
+                                 error=validation_error)]
     
     # Téléchargement
     path = TEMP_DIR / attachment.filename
-    await attachment.save(path, seek_begin=True, use_cached=True)
+    try:
+        await attachment.save(path, seek_begin=True, use_cached=True)
+    except Exception as e:
+        logger.error(f"Erreur téléchargement vidéo '{attachment.filename}': {e}")
+        return [MetadataComponent('VIDEO',
+                                 filename=attachment.filename,
+                                 error='DOWNLOAD_FAILED')]
     
     if not path.exists():
         return [MetadataComponent('VIDEO',
@@ -158,10 +181,27 @@ async def process_video_attachment(attachment: discord.Attachment,
         cache.set_video_analysis(attachment.filename, analysis)
         return [analysis]
     except Exception as e:
-        logger.error(f"Erreur analyse vidéo '{attachment.filename}': {e}")
+        logger.error(f"Erreur analyse vidéo '{attachment.filename}': {e}", exc_info=True)
         return [MetadataComponent('VIDEO',
                                  filename=attachment.filename,
-                                 error='ANALYSIS_FAILED')]
+                                 error=f'ANALYSIS_FAILED: {type(e).__name__}')]
+
+async def _validate_video_before_processing(attachment: discord.Attachment) -> Optional[str]:
+    """Valide qu'une vidéo peut être traitée.
+    
+    Returns:
+        None si OK, sinon message d'erreur
+    """
+    # Taille
+    if attachment.size > MAX_VIDEO_SIZE:
+        return f'FILE_TOO_LARGE (max {MAX_VIDEO_SIZE // 1024 // 1024}MB)'
+    
+    # Extension
+    valid_extensions = ['.mp4', '.avi', '.mov', '.webm', '.mkv']
+    if not any(attachment.filename.lower().endswith(ext) for ext in valid_extensions):
+        return f'UNSUPPORTED_FORMAT (formats supportés: {", ".join(valid_extensions)})'
+    
+    return None  # OK
 
 async def _analyze_video_file(path: Path, filename: str, client: MariaLLMClient) -> MetadataComponent:
     """Analyse un fichier vidéo (extraction audio + frames + analyse IA)."""
@@ -178,40 +218,82 @@ async def _analyze_video_file(path: Path, filename: str, client: MariaLLMClient)
         duration = getattr(clip, 'duration', 0) or 0
         audio = getattr(clip, 'audio', None)
         
-        # Extraction audio
-        if audio:
+        # Vérifier la durée
+        if duration > MAX_VIDEO_DURATION:
+            logger.warning(f"Vidéo trop longue: {duration}s (max {MAX_VIDEO_DURATION}s)")
+            return MetadataComponent('VIDEO',
+                                    filename=filename,
+                                    duration=duration,
+                                    error=f'VIDEO_TOO_LONG (durée: {int(duration)}s, max: {MAX_VIDEO_DURATION}s)')
+        
+        # Extraction audio (avec validation)
+        if audio and duration > 0:
             audio_path = path.with_suffix('.wav')
             try:
-                audio.write_audiofile(str(audio_path), verbose=False, logger=None)
-                audio_transcript = await client.create_transcription(
-                    audio_path, 
-                    model=VIDEO_ANALYSIS_AUDIO_MODEL
-                )
+                # Vérifier que l'audio a vraiment du contenu
+                if audio.duration > 0.1:  # Au moins 100ms d'audio
+                    audio.write_audiofile(str(audio_path), verbose=False, logger=None)
+                    
+                    # Vérifier que le fichier a été créé et n'est pas vide
+                    if audio_path.exists() and audio_path.stat().st_size > 1000:  # Au moins 1KB
+                        audio_transcript = await client.create_transcription(
+                            audio_path, 
+                            model=VIDEO_ANALYSIS_AUDIO_MODEL
+                        )
+                    else:
+                        audio_transcript = "AUDIO_FILE_EMPTY"
+                else:
+                    audio_transcript = "NO_AUDIO_CONTENT"
             except TypeError:
                 # Fallback anciennes versions moviepy
-                audio.write_audiofile(str(audio_path))
-                audio_transcript = await client.create_transcription(
-                    audio_path,
-                    model=VIDEO_ANALYSIS_AUDIO_MODEL
-                )
+                try:
+                    audio.write_audiofile(str(audio_path))
+                    if audio_path.exists() and audio_path.stat().st_size > 1000:
+                        audio_transcript = await client.create_transcription(
+                            audio_path,
+                            model=VIDEO_ANALYSIS_AUDIO_MODEL
+                        )
+                    else:
+                        audio_transcript = "AUDIO_FILE_EMPTY"
+                except Exception as e:
+                    logger.error(f"Erreur extraction audio (fallback): {e}")
+                    audio_transcript = f"AUDIO_EXTRACTION_FAILED: {type(e).__name__}"
             except Exception as e:
-                logger.warning(f"Erreur extraction audio: {e}")
-                audio_transcript = "AUDIO_EXTRACTION_FAILED"
+                logger.error(f"Erreur extraction audio: {e}", exc_info=True)
+                audio_transcript = f"AUDIO_EXTRACTION_FAILED: {type(e).__name__}"
+        else:
+            audio_transcript = "NO_AUDIO_TRACK"
         
-        # Extraction frames
+        # Extraction frames (avec validation)
         if duration and duration > 0:
             time_points = [duration * i / VIDEO_ANALYSIS_NB_FRAMES 
                           for i in range(VIDEO_ANALYSIS_NB_FRAMES)]
             
+            successful_frames = 0
             for t, time_point in enumerate(time_points):
                 try:
                     frame = clip.get_frame(time_point)
                     frame_path = path.with_stem(f"frame_{t}").with_suffix('.jpg')
-                    imageio.imwrite(str(frame_path), frame)
-                    images.append(frame_path)
+                    
+                    # Vérifier que la frame n'est pas corrompue (taille minimale)
+                    if frame.size > 100:  # Au moins 100 pixels
+                        imageio.imwrite(str(frame_path), frame)
+                        
+                        # Vérifier que le fichier a été créé
+                        if frame_path.exists() and frame_path.stat().st_size > 5000:  # Au moins 5KB
+                            images.append(frame_path)
+                            successful_frames += 1
                 except Exception as e:
                     logger.warning(f"Erreur extraction frame {t}: {e}")
                     continue
+            
+            # Vérifier qu'on a assez de frames
+            if successful_frames < VIDEO_ANALYSIS_MIN_FRAMES:
+                logger.error(f"Pas assez de frames extraites: {successful_frames}/{VIDEO_ANALYSIS_NB_FRAMES}")
+                return MetadataComponent('VIDEO',
+                                        filename=filename,
+                                        duration=duration,
+                                        error=f'INSUFFICIENT_FRAMES ({successful_frames} extraites, min {VIDEO_ANALYSIS_MIN_FRAMES})')
         
         # Analyse IA
         if images:
@@ -239,6 +321,7 @@ async def _analyze_video_content(images: list[Path],
     try:
         from .context import MessageRecord
         from datetime import datetime, timezone
+        from PIL import Image
         
         # Construire les messages
         messages = []
@@ -252,18 +335,27 @@ async def _analyze_video_content(images: list[Path],
         # Composants utilisateur
         user_content = []
         
-        # Ajouter les images
+        # Ajouter les images (redimensionnées pour réduire coût API)
         for image_path in images:
             if not image_path.exists():
                 continue
             try:
-                with open(image_path, 'rb') as img_file:
-                    encoded = base64.b64encode(img_file.read()).decode('utf-8')
-                    data_url = f"data:image/jpeg;base64,{encoded}"
-                    user_content.append({
-                        'type': 'image_url',
-                        'image_url': {'url': data_url, 'detail': 'low'}
-                    })
+                # Charger et redimensionner l'image
+                img = Image.open(image_path)
+                img.thumbnail(MAX_IMAGE_SIZE, Image.Resampling.LANCZOS)
+                
+                # Sauvegarder dans un buffer
+                buffer = io.BytesIO()
+                img.save(buffer, format='JPEG', quality=85, optimize=True)
+                buffer.seek(0)
+                
+                # Encoder en base64
+                encoded = base64.b64encode(buffer.read()).decode('utf-8')
+                data_url = f"data:image/jpeg;base64,{encoded}"
+                user_content.append({
+                    'type': 'image_url',
+                    'image_url': {'url': data_url, 'detail': 'low'}
+                })
             except Exception as e:
                 logger.warning(f"Erreur encodage image {image_path}: {e}")
                 continue

@@ -178,23 +178,10 @@ class Auto(commands.Cog):
         if not proposals:
             return
         
-        # Menu de sélection si plusieurs propositions
-        if len(proposals) > 1:
-            # Créer un menu
-            view = ProposalView(self, message, proposals, user)
-            try:
-                await message.reply(
-                    f"💡 Que voulez-vous faire avec ce message ?",
-                    view=view,
-                    mention_author=False,
-                    delete_after=30
-                )
-            except Exception as e:
-                logger.error(f"Erreur création menu: {e}")
-        else:
-            # Une seule proposition, l'exécuter directement
-            proposal_type = list(proposals)[0]
-            await self._execute_proposal(message, proposal_type, user)
+        # Actuellement, un seul type de proposition (transcription)
+        # Si plusieurs types à l'avenir, implémenter le menu de sélection
+        proposal_type = list(proposals)[0]
+        await self._execute_proposal(message, proposal_type, user)
     
     async def _execute_proposal(self, message: discord.Message, proposal_type: str, user: discord.User):
         """Exécute une proposition."""

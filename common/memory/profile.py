@@ -41,12 +41,23 @@ class UserProfile:
     def should_update(self) -> bool:
         """Détermine si le profil doit être mis à jour automatiquement.
         
-        Règles (moins fréquentes car l'IA peut déclencher manuellement):
-        - Au moins 30 messages depuis dernière MAJ
-        - ET au moins 12h écoulées
+        Règles optimisées pour plus de réactivité:
+        - Au moins 15 messages depuis dernière MAJ ET au moins 6h écoulées (cas normal)
+        - OU au moins 40 messages même si récent (utilisateur très actif)
+        
+        L'IA peut aussi déclencher manuellement via update_user_profile à tout moment.
         """
         hours_elapsed = (datetime.now(timezone.utc) - self.updated_at).total_seconds() / 3600
-        return self.messages_since_update >= 30 and hours_elapsed >= 12
+        
+        # Cas normal: 15 messages + 6h
+        if self.messages_since_update >= 15 and hours_elapsed >= 6:
+            return True
+        
+        # Cas utilisateur très actif: 40 messages même si récent
+        if self.messages_since_update >= 40:
+            return True
+        
+        return False
     
     def increment_messages(self) -> None:
         """Incrémente le compteur de messages."""

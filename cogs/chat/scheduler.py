@@ -136,6 +136,39 @@ class TaskDatabase:
         conn.close()
         return tasks
     
+    def get_next_pending_task(self) -> Optional[ScheduledTask]:
+        """Récupère la prochaine tâche en attente (pour calculer le délai de sleep).
+        
+        Returns:
+            La prochaine tâche ou None
+        """
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT * FROM scheduled_tasks
+            WHERE status = 'pending'
+            ORDER BY execute_at ASC
+            LIMIT 1
+        ''')
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return ScheduledTask(
+                id=row['id'],
+                channel_id=row['channel_id'],
+                user_id=row['user_id'],
+                task_description=row['task_description'],
+                execute_at=datetime.fromisoformat(row['execute_at']),
+                created_at=datetime.fromisoformat(row['created_at']),
+                status=row['status'],
+                message_id=row['message_id'] if 'message_id' in row.keys() else 0
+            )
+        return None
+    
     def update_task_status(self, task_id: int, status: str):
         """Met à jour le statut d'une tâche."""
         conn = sqlite3.connect(self.db_path, timeout=30.0)
@@ -380,6 +413,19 @@ class TaskScheduler:
             except Exception as e:
                 logger.error(f"Erreur dans le worker scheduler: {e}", exc_info=True)
             
-            # Attendre 30 secondes avant la prochaine vérification
-            await asyncio.sleep(30)
+            # Sleep dynamique pour optimiser les performances
+            if pending_tasks:
+                # Si des tâches ont été exécutées, check fréquent
+                await asyncio.sleep(30)
+            else:
+                # Calculer le délai avant la prochaine tâche
+                next_task = self.db.get_next_pending_task()
+                if next_task:
+                    wait_time = (next_task.execute_at - datetime.now(timezone.utc)).total_seconds()
+                    # Attendre au maximum 5 minutes, au minimum 30 secondes
+                    wait_time = max(30, min(wait_time, 300))
+                    await asyncio.sleep(wait_time)
+                else:
+                    # Aucune tâche en attente, check toutes les 5 minutes
+                    await asyncio.sleep(300)
 

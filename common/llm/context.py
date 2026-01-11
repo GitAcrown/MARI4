@@ -224,10 +224,14 @@ class ConversationContext:
         # Historique des messages
         self._messages: list[MessageRecord] = []
         
+        # Flag pour optimiser le trim (ne trim que si nécessaire)
+        self._needs_trim: bool = False
+        
     
     def add_message(self, message: MessageRecord) -> None:
         """Ajoute un message à l'historique."""
         self._messages.append(message)
+        self._needs_trim = True  # Marquer qu'un trim sera nécessaire
     
     def add_user_message(self, components: list[ContentComponent], 
                         name: str = 'user',
@@ -287,6 +291,7 @@ class ConversationContext:
     def clear(self) -> None:
         """Vide l'historique."""
         self._messages.clear()
+        self._needs_trim = False  # Réinitialiser le flag
         logger.info("Historique vidé")
     
     def trim(self) -> None:
@@ -374,8 +379,10 @@ class ConversationContext:
         
         Inclut le prompt développeur + tous les messages de l'historique.
         """
-        # Nettoyage avant préparation
-        self.trim()
+        # Nettoyage avant préparation (seulement si nécessaire)
+        if self._needs_trim:
+            self.trim()
+            self._needs_trim = False
         
         # Prompt développeur
         dev_message = MessageRecord(

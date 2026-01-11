@@ -52,6 +52,15 @@ SUPPORTED_IMAGE_FORMATS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}
 SUPPORTED_VIDEO_FORMATS = {'.mp4', '.webm', '.mov', '.avi', '.mkv', '.m4v'}
 SUPPORTED_AUDIO_FORMATS = {'.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac'}
 
+# Sites connus pour être difficiles à extraire
+DIFFICULT_SITES = {
+    'twitter.com', 'x.com',  # Nécessite login
+    'facebook.com', 'instagram.com',  # Nécessite login
+    'reddit.com',  # Souvent bloqué
+    'medium.com',  # Paywall
+    'linkedin.com'  # Nécessite login
+}
+
 # Patterns pour nettoyer le contenu
 NOISE_PATTERNS = [
     r'En poursuivant votre navigation.*?cookies.*?\.',
@@ -166,7 +175,7 @@ class Web(commands.Cog):
         return False
     
     def search_web_pages(self, query: str, lang: str = 'fr', num_results: int = DEFAULT_NUM_RESULTS) -> List[Dict]:
-        """Effectue une recherche web avec DDGS."""
+        """Effectue une recherche web avec DDGS et enrichit les 2 premiers résultats."""
         cache_key = f"{lang}:{query.strip().lower()}"
         cache_entry = self.search_cache.get(cache_key)
         now = time.time()
@@ -188,11 +197,38 @@ class Web(commands.Cog):
                     }
                     for r in results
                 ]
+                
+                # Enrichir les 2 premiers résultats avec un extrait de la page
+                enriched_results = []
+                for i, result in enumerate(parsed_results):
+                    if i < 2:  # Enrichir uniquement les 2 premiers
+                        try:
+                            # Fetch rapide du contenu (timeout court)
+                            response = requests.get(
+                                result['url'], 
+                                headers=DEFAULT_HEADERS, 
+                                timeout=5,
+                                allow_redirects=True
+                            )
+                            if response.status_code == 200:
+                                # Extraction légère avec BeautifulSoup
+                                soup = BeautifulSoup(response.text, 'html.parser')
+                                # Prendre les premiers paragraphes
+                                paragraphs = soup.find_all('p', limit=4)
+                                excerpt = ' '.join(p.get_text(strip=True) for p in paragraphs)
+                                if len(excerpt) > 600:
+                                    excerpt = excerpt[:600] + '...'
+                                if len(excerpt) > 100:  # Au moins 100 caractères pour être utile
+                                    result['excerpt'] = excerpt
+                        except:
+                            pass  # Garder juste la description si échec
+                    enriched_results.append(result)
+                
                 self.search_cache[cache_key] = {
-                    'results': parsed_results,
+                    'results': enriched_results,
                     'timestamp': now
                 }
-                return parsed_results
+                return enriched_results
         except Exception as e:
             logger.error(f"Erreur recherche web: {e}")
             return []
@@ -311,6 +347,13 @@ class Web(commands.Cog):
             if time.time() - cache_entry['timestamp'] < CACHE_EXPIRY_HOURS * 3600:
                 return cache_entry['chunks']
         
+        # Check blacklist (sites difficiles connus)
+        parsed_url = urlparse(url)
+        domain = parsed_url.netloc
+        if any(difficult in domain for difficult in DIFFICULT_SITES):
+            logger.warning(f"Site difficile détecté: {domain}")
+            return []  # Retour rapide
+        
         html_content = None
         response = None
         
@@ -357,12 +400,16 @@ class Web(commands.Cog):
                     logger.warning(f"Erreur requête pour {url}: {e}")
                     continue
             
-            if not html_content or response.status_code != 200:
-                error_msg = f"Impossible de récupérer la page (status: {response.status_code if response else 'N/A'})"
-                if response and response.status_code == 403:
-                    error_msg += ". Le site bloque peut-être les robots. Essayez une autre source."
-                elif response and response.status_code == 429:
-                    error_msg += ". Trop de requêtes. Réessayez plus tard."
+            if not html_content or (response and response.status_code != 200):
+                if response:
+                    if response.status_code == 403:
+                        logger.warning(f"Accès refusé (403) pour {url}")
+                    elif response.status_code == 404:
+                        logger.warning(f"Page introuvable (404) pour {url}")
+                    elif response.status_code == 429:
+                        logger.warning(f"Trop de requêtes (429) pour {url}")
+                    else:
+                        logger.warning(f"Erreur HTTP {response.status_code} pour {url}")
                 return []
             
             # Stratégie 1: Trafilatura (meilleure qualité)
@@ -512,9 +559,11 @@ class Web(commands.Cog):
             parsed = urlparse(url)
             domain = parsed.netloc or url.split("//")[-1].split("/")[0]
             
-            error_msg = f"Impossible de lire cette page ({domain})."
-            error_msg += " Raisons possibles : site bloquant les robots, contenu JavaScript uniquement,"
-            error_msg += " page protégée, ou erreur réseau. Essayez une autre source ou URL."
+            # Message d'erreur spécifique selon le site
+            if any(difficult in domain for difficult in DIFFICULT_SITES):
+                error_msg = f"Impossible de lire {domain} : ce site nécessite une connexion ou bloque les robots. Cherchez plutôt sur un site d'actualités ou documentation officielle."
+            else:
+                error_msg = f"Impossible de lire cette page ({domain}). Le site peut bloquer les robots ou être en JavaScript pur. Essayez une autre source."
             
             return ToolResponseRecord(
                 tool_call_id=tool_call.id,

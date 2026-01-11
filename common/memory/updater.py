@@ -19,8 +19,8 @@ class UserProfileSchema(BaseModel):
     content: str = ""  # Profil complet en texte libre
     no_change: bool = False  # True si aucune nouvelle info
 
-# Prompt pour la mini-IA
-PROFILE_UPDATE_PROMPT = """Mets a jour le profil utilisateur.
+# Prompt pour la mini-IA (optimisé pour plus de mises à jour)
+PROFILE_UPDATE_PROMPT = """Mets à jour le profil utilisateur à partir des nouveaux messages.
 
 PROFIL ACTUEL:
 {current_profile}
@@ -28,25 +28,37 @@ PROFIL ACTUEL:
 NOUVEAUX MESSAGES:
 {messages}
 
-REGLE #1: Le champ "content" contient UNIQUEMENT le profil en texte brut. PAS de prefixes comme "Ajout:", "Information:", etc.
+INSTRUCTIONS:
 
-REGLE #2: Garder SEULEMENT les infos utiles long terme:
-- Prénom, métier, ville/pays, sexe, age, etc.
-- Préférences de ton (tutoiement, niveau detail, sujets à éviter)
-- Competences techniques, passions, centres d'interet, etc.
-- Contraintes durables
+RÈGLE #0 - IMPORTANT:
+En cas de DOUTE sur la pertinence d'une info, GARDE-LA plutôt que de l'ignorer.
+Il vaut mieux un profil légèrement verbeux qu'un profil incomplet.
 
-REGLE #3: IGNORE tout le reste:
-- Goûts temporaires, projets ponctuels
-- Actions du moment, infos sur d'autres personnes
+1. ANALYSE les nouveaux messages pour extraire UNIQUEMENT les infos durables:
+   - Identité: prénom, âge, métier, ville, nationalité, sexe
+   - Préférences de communication: ton souhaité (tutoiement/vouvoiement), niveau de détail
+   - Compétences, passions, centres d'intérêt récurrents
+   - Contraintes durables (santé, disponibilité, etc.)
 
-REGLE #4: N'écris QUE ce qui est EXPLICITEMENT dit. Aucune supposition, aucune interprétation.
+2. IGNORE tout le reste:
+   - Opinions temporaires, actions ponctuelles ("J'ai fait X hier", "Je vais faire Y")
+   - Questions posées par l'utilisateur
+   - Infos sur d'autres personnes
+   - Projets ponctuels ou de courte durée
 
-REGLE #5: Profite pour NETTOYER le profil actuel:
-- Supprime les infos qui ne sont pas pertinentes pour le profil (ex: infos sur d'autres personnes, projets ponctuels, etc.)
-- Retire toute indication "meta" telles que "Absence de ...", "X non renseigné", "X non défini", etc.
-- Fusionne les doublons
-- Garde SEULEMENT l'essentiel sans perte d'informations et de manière la plus concise possible
+3. MISE À JOUR:
+   - Si nouvelle info durable : AJOUTE au profil
+   - Si info contradictoire avec profil actuel : REMPLACE par la plus récente
+   - Si aucune nouvelle info durable : mets no_change à true
+
+4. NETTOYAGE (à chaque fois):
+   - Supprime formulations meta ("X non renseigné", "Absence de", "X non défini", etc.)
+   - Fusionne doublons et répétitions
+   - Reste concis mais complet
+
+FORMAT:
+Le champ "content" contient UNIQUEMENT le profil en texte brut. PAS de préfixes, PAS de structure avec tirets.
+Exemple: "Théo, 24 ans, développeur web à Lyon. Préfère le tutoiement et les explications détaillées. Passionné de jeux vidéo et de musique électronique."
 """
 
 class ProfileUpdater:
@@ -151,7 +163,7 @@ class ProfileUpdater:
     def _format_messages(self, messages: list[discord.Message]) -> str:
         """Formate les messages pour le prompt."""
         formatted = []
-        for msg in reversed(messages[-15:]):  # Max 15 derniers messages, du plus ancien au plus récent
+        for msg in reversed(messages[-25:]):  # Max 25 derniers messages (plus de contexte), du plus ancien au plus récent
             # Extraire juste le texte, sans les métadonnées Discord
             content = msg.content.strip()
             if content:
